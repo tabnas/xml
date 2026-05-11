@@ -23,7 +23,7 @@ import { Xml, decodeBOM } from '../dist/xml'
 
 // At runtime this test file is loaded from `dist-test/`, so hop up one
 // level to reach the shared spec directory in the project root.
-const specDir = join(__dirname, '..', 'test', 'spec')
+const specDir = join(__dirname, '..', '..', 'test', 'spec')
 
 type SpecRow = {
   file: string
@@ -230,7 +230,7 @@ describe('xml-embedded-in-jsonic', () => {
 // ~116/120 valid and ~39/186 not-wf rejected.
 // ---------------------------------------------------------------------------
 
-const xmlconfRoot = join(__dirname, '..', 'test', 'xmlconf')
+const xmlconfRoot = join(__dirname, '..', '..', 'test', 'xmlconf')
 const xmlconfAvailable = existsSync(join(xmlconfRoot, 'xmltest'))
 
 // Regression guards; raise once parser coverage improves.
