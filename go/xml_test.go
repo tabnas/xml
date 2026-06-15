@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	jsonic "github.com/jsonicjs/jsonic/go"
+	jsonic "github.com/tabnas/jsonic/go"
 )
 
 // specEntry represents one row of a TSV spec file.

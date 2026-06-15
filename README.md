@@ -1,4 +1,4 @@
-# @jsonic/xml
+# @tabnas/xml
 
 This plugin allows the [Jsonic](https://jsonic.senecajs.org) JSON parser to support xml syntax.
 

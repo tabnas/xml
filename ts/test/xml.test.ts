@@ -5,7 +5,7 @@ import assert from 'node:assert'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { Jsonic } from 'jsonic'
+import { Jsonic } from '@tabnas/jsonic'
 import { Xml, decodeBOM } from '../dist/xml'
 
 // ---------------------------------------------------------------------------

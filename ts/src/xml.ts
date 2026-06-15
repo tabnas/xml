@@ -10,7 +10,7 @@ import {
   Config,
   Options,
   Lex,
-} from 'jsonic'
+} from '@tabnas/jsonic'
 
 // A parsed XML element.
 //

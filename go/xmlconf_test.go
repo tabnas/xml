@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	jsonic "github.com/jsonicjs/jsonic/go"
+	jsonic "github.com/tabnas/jsonic/go"
 )
 
 // Exercise the parser against the W3C XML Conformance Test Suite

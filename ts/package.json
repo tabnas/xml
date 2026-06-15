@@ -1,11 +1,11 @@
 {
-  "name": "@jsonic/xml",
+  "name": "@tabnas/xml",
   "version": "0.1.1",
   "description": "This plugin allows the [Jsonic](https://jsonic.senecajs.org) JSON parser to support xml syntax.",
   "main": "dist/xml.js",
   "type": "commonjs",
   "types": "dist/xml.d.ts",
-  "homepage": "https://github.com/jsonicjs/xml",
+  "homepage": "https://github.com/tabnas/xml",
   "keywords": [
     "pattern",
     "matcher",
@@ -16,7 +16,7 @@
   "author": "Richard Rodger (http://richardrodger.com)",
   "repository": {
     "type": "git",
-    "url": "git://github.com/jsonicjs/xml.git"
+    "url": "git://github.com/tabnas/xml.git"
   },
   "scripts": {
     "test": "node --enable-source-maps --test \"dist-test/*.test.js\"",
@@ -42,6 +42,6 @@
     "typescript": "6.0.3"
   },
   "peerDependencies": {
-    "jsonic": "2.28.0"
+    "@tabnas/jsonic": "file:../../jsonic/ts"
   }
 }

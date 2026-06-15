@@ -1,4 +1,4 @@
-# @jsonic/xml
+# @tabnas/xml
 
 A [Jsonic](https://jsonic.senecajs.org) syntax plugin that parses
 XML text into a tree of elements, with support for attributes, mixed
@@ -10,15 +10,15 @@ package on npm and a Go module:
 
 | Language   | Package                                                     | Source                                                       |
 | ---------- | ----------------------------------------------------------- | ------------------------------------------------------------ |
-| TypeScript | [`@jsonic/xml`](https://npmjs.com/package/@jsonic/xml)      | [`src/xml.ts`](src/xml.ts)                                   |
-| Go         | [`github.com/jsonicjs/xml/go`](https://github.com/jsonicjs/xml/tree/main/go) | [`go/xml.go`](go/xml.go)            |
+| TypeScript | [`@tabnas/xml`](https://npmjs.com/package/@tabnas/xml)      | [`src/xml.ts`](src/xml.ts)                                   |
+| Go         | [`github.com/tabnas/xml/go`](https://github.com/tabnas/xml/tree/main/go) | [`go/xml.go`](go/xml.go)            |
 
-[![npm version](https://img.shields.io/npm/v/@jsonic/xml.svg)](https://npmjs.com/package/@jsonic/xml)
-[![build](https://github.com/jsonicjs/xml/actions/workflows/build.yml/badge.svg)](https://github.com/jsonicjs/xml/actions/workflows/build.yml)
-[![Coverage Status](https://coveralls.io/repos/github/jsonicjs/xml/badge.svg?branch=main)](https://coveralls.io/github/jsonicjs/xml?branch=main)
-[![Known Vulnerabilities](https://snyk.io/test/github/jsonicjs/xml/badge.svg)](https://snyk.io/test/github/jsonicjs/xml)
+[![npm version](https://img.shields.io/npm/v/@tabnas/xml.svg)](https://npmjs.com/package/@tabnas/xml)
+[![build](https://github.com/tabnas/xml/actions/workflows/build.yml/badge.svg)](https://github.com/tabnas/xml/actions/workflows/build.yml)
+[![Coverage Status](https://coveralls.io/repos/github/tabnas/xml/badge.svg?branch=main)](https://coveralls.io/github/tabnas/xml?branch=main)
+[![Known Vulnerabilities](https://snyk.io/test/github/tabnas/xml/badge.svg)](https://snyk.io/test/github/tabnas/xml)
 [![DeepScan grade](https://deepscan.io/api/teams/5016/projects/22466/branches/663906/badge/grade.svg)](https://deepscan.io/dashboard#view=project&tid=5016&pid=22466&bid=663906)
-[![Maintainability](https://api.codeclimate.com/v1/badges/10e9bede600896c77ce8/maintainability)](https://codeclimate.com/github/jsonicjs/xml/maintainability)
+[![Maintainability](https://api.codeclimate.com/v1/badges/10e9bede600896c77ce8/maintainability)](https://codeclimate.com/github/tabnas/xml/maintainability)
 
 | ![Voxgig](https://www.voxgig.com/res/img/vgt01r.png) | This open source module is sponsored and supported by [Voxgig](https://www.voxgig.com). |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------- |
@@ -29,13 +29,13 @@ package on npm and a Go module:
 **TypeScript / JavaScript**
 
 ```sh
-npm install jsonic @jsonic/xml
+npm install @tabnas/jsonic @tabnas/xml
 ```
 
 **Go**
 
 ```sh
-go get github.com/jsonicjs/xml/go
+go get github.com/tabnas/xml/go
 ```
 
 
@@ -44,8 +44,8 @@ go get github.com/jsonicjs/xml/go
 **TypeScript**
 
 ```typescript
-import { Jsonic } from 'jsonic'
-import { Xml } from '@jsonic/xml'
+import { Jsonic } from '@tabnas/jsonic'
+import { Xml } from '@tabnas/xml'
 
 const parse = Jsonic.make().use(Xml)
 
@@ -63,8 +63,8 @@ parse('<greeting lang="en">Hello, <b>world</b>!</greeting>')
 
 ```go
 import (
-    jsonic "github.com/jsonicjs/jsonic/go"
-    xml "github.com/jsonicjs/xml/go"
+    jsonic "github.com/tabnas/jsonic/go"
+    xml "github.com/tabnas/xml/go"
 )
 
 j := jsonic.Make()

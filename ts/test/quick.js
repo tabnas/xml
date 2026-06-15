@@ -1,4 +1,4 @@
-const { Jsonic } = require('jsonic')
+const { Jsonic } = require('@tabnas/jsonic')
 const { Xml } = require('../dist/xml')
 
 const xml = Jsonic.make().use(Xml)

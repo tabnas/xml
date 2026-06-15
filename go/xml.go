@@ -23,7 +23,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
-	jsonic "github.com/jsonicjs/jsonic/go"
+	jsonic "github.com/tabnas/jsonic/go"
 )
 
 const Version = "0.1.1"
@@ -341,7 +341,7 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 		// push the `element` rule (backtracking by 1 so element.open
 		// can read the same token and dispatch).
 		j.Rule("val", func(rs *jsonic.RuleSpec, _ *jsonic.Parser) {
-			rs.Open = append(rs.Open,
+			rs.AddOpen(
 				&jsonic.AltSpec{
 					S: [][]jsonic.Tin{{xopTin}},
 					B: 1, P: "element", G: "xml",
