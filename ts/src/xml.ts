@@ -324,6 +324,14 @@ Expected </$openname> but found </$fsrc>.`,
         })
       })
     }
+  } else {
+    // Pure XML mode: the `xml` start rule reaches only the XML rules
+    // (element/content/child), so Jsonic's JSON value rules are now dead.
+    // Remove them from the grammar definition so the parser — and the
+    // generated railroad diagram — carries only the rules XML actually uses.
+    for (const name of ['val', 'map', 'list', 'pair', 'elem']) {
+      tn.rule(name, null)
+    }
   }
 }
 
