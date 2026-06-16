@@ -47,7 +47,7 @@ child:
           │
 
 Tokens:
-  TX  = bare text
-  XCL = XCL token
-  XOP = XOP token
-  XSC = XSC token
+  TX  = text / character data between tags
+  XCL = XML closing tag </name>
+  XOP = XML open tag <name ...>
+  XSC = XML self-closing tag <name .../>
