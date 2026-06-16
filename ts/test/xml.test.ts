@@ -5,7 +5,8 @@ import assert from 'node:assert'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { Jsonic } from '@tabnas/jsonic'
+import { Tabnas } from '@tabnas/parser'
+import { jsonic } from '@tabnas/jsonic'
 import { Xml, decodeBOM } from '../dist/xml'
 
 // ---------------------------------------------------------------------------
@@ -84,12 +85,14 @@ function runSpec(file: string) {
     for (const row of rows) {
       test(row.name, () => {
         const opts = row.opts.trim() === '' ? undefined : JSON.parse(row.opts)
-        const jx = opts ? Jsonic.make().use(Xml, opts) : Jsonic.make().use(Xml)
+        const jx = opts
+          ? new Tabnas().use(jsonic).use(Xml, opts)
+          : new Tabnas().use(jsonic).use(Xml)
 
         if (row.expected.startsWith('ERROR')) {
           const code = row.expected.slice(5).replace(/^:/, '')
           assert.throws(
-            () => jx(row.input),
+            () => jx.parse(row.input),
             (err: Error) =>
               code === '' || err.message.includes(code) ||
               // Jsonic wraps codes as `jsonic/<code>`; accept that form too.
@@ -99,7 +102,7 @@ function runSpec(file: string) {
           return
         }
 
-        const got = jx(row.input)
+        const got = jx.parse(row.input)
         const want = JSON.parse(row.expected)
         // Round-trip `got` through JSON so ordering of keys does not affect
         // structural comparison (deepEqual is already order-insensitive for
@@ -133,20 +136,20 @@ for (const file of readdirSync(specDir)) {
 
 describe('xml-embedded-in-jsonic', () => {
   test('plain Jsonic is unaffected by embed mode', () => {
-    const j = Jsonic.make().use(Xml, { embed: true })
-    assert.deepEqual(j('{a:1, b:"two"}'), { a: 1, b: 'two' })
-    assert.deepEqual(j('[1, 2, 3]'), [1, 2, 3])
+    const j = new Tabnas().use(jsonic).use(Xml, { embed: true })
+    assert.deepEqual(j.parse('{a:1, b:"two"}'), { a: 1, b: 'two' })
+    assert.deepEqual(j.parse('[1, 2, 3]'), [1, 2, 3])
   })
 
   test('XML literal as the top-level value', () => {
-    const j = Jsonic.make().use(Xml, { embed: true })
-    assert.deepEqual(j('<a>hello</a>'), {
+    const j = new Tabnas().use(jsonic).use(Xml, { embed: true })
+    assert.deepEqual(j.parse('<a>hello</a>'), {
       name: 'a',
       localName: 'a',
       attributes: {},
       children: ['hello'],
     })
-    assert.deepEqual(j('<br/>'), {
+    assert.deepEqual(j.parse('<br/>'), {
       name: 'br',
       localName: 'br',
       attributes: {},
@@ -155,7 +158,7 @@ describe('xml-embedded-in-jsonic', () => {
   })
 
   test('XML literal as a value inside a Jsonic map', () => {
-    const j = Jsonic.make().use(Xml, { embed: true })
+    const j = new Tabnas().use(jsonic).use(Xml, { embed: true })
     const src =
       '{\n' +
       '  title: "order-42",\n' +
@@ -164,7 +167,7 @@ describe('xml-embedded-in-jsonic', () => {
       '    <item qty="1">Gadget</item>\n' +
       '  </order>,\n' +
       '}'
-    const result = j(src) as any
+    const result = j.parse(src) as any
     assert.equal(result.title, 'order-42')
     const payload = result.payload
     assert.equal(payload.name, 'order')
@@ -183,14 +186,14 @@ describe('xml-embedded-in-jsonic', () => {
     // Without embed-mode text handling, Jsonic's lexer would split this
     // text on the comma and reject the fragment. The custom matcher
     // claims the run when depth > 0, so it arrives as a single child.
-    const j = Jsonic.make().use(Xml, { embed: true })
-    assert.deepEqual(j('<a>Hello, World!</a>'), {
+    const j = new Tabnas().use(jsonic).use(Xml, { embed: true })
+    assert.deepEqual(j.parse('<a>Hello, World!</a>'), {
       name: 'a',
       localName: 'a',
       attributes: {},
       children: ['Hello, World!'],
     })
-    assert.deepEqual(j('<a>key: value</a>'), {
+    assert.deepEqual(j.parse('<a>key: value</a>'), {
       name: 'a',
       localName: 'a',
       attributes: {},
@@ -199,8 +202,8 @@ describe('xml-embedded-in-jsonic', () => {
   })
 
   test('multiple XML literals inside a Jsonic list', () => {
-    const j = Jsonic.make().use(Xml, { embed: true })
-    const result = j('[<a/>, <b>x</b>, <c x="1"/>]') as any[]
+    const j = new Tabnas().use(jsonic).use(Xml, { embed: true })
+    const result = j.parse('[<a/>, <b>x</b>, <c x="1"/>]') as any[]
     assert.equal(result.length, 3)
     assert.equal(result[0].name, 'a')
     assert.equal(result[1].name, 'b')
@@ -209,8 +212,8 @@ describe('xml-embedded-in-jsonic', () => {
   })
 
   test('XML literal with namespaces resolves correctly', () => {
-    const j = Jsonic.make().use(Xml, { embed: true })
-    const result = j(
+    const j = new Tabnas().use(jsonic).use(Xml, { embed: true })
+    const result = j.parse(
       '{doc: <root xmlns="http://e.example"><child/></root>}',
     ) as any
     assert.equal(result.doc.namespace, 'http://e.example')
@@ -249,7 +252,7 @@ describe('w3c-xml-conformance', { skip: !xmlconfAvailable }, () => {
   test('valid/sa documents parse', () => {
     const files = xmlconfFiles(join(xmlconfRoot, 'xmltest', 'valid', 'sa'))
     assert.ok(files.length > 0, 'no valid/sa files')
-    const parser = Jsonic.make().use(Xml)
+    const parser = new Tabnas().use(jsonic).use(Xml)
     let pass = 0
     const failures: string[] = []
     for (const path of files) {
@@ -259,7 +262,7 @@ describe('w3c-xml-conformance', { skip: !xmlconfAvailable }, () => {
       // / UTF-32 documents.
       const body = decodeBOM(readFileSync(path))
       try {
-        parser(body)
+        parser.parse(body)
         pass++
       } catch (err) {
         const msg = (err as Error).message.split('\n', 1)[0]
@@ -276,13 +279,13 @@ describe('w3c-xml-conformance', { skip: !xmlconfAvailable }, () => {
   test('not-wf/sa documents are rejected', () => {
     const files = xmlconfFiles(join(xmlconfRoot, 'xmltest', 'not-wf', 'sa'))
     assert.ok(files.length > 0, 'no not-wf/sa files')
-    const parser = Jsonic.make().use(Xml)
+    const parser = new Tabnas().use(jsonic).use(Xml)
     let rejected = 0
     const falseAccepts: string[] = []
     for (const path of files) {
       const body = decodeBOM(readFileSync(path))
       try {
-        parser(body)
+        parser.parse(body)
         falseAccepts.push(path.split('/').slice(-1)[0])
       } catch {
         rejected++
