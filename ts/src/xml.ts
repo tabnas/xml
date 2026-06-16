@@ -126,6 +126,24 @@ const Xml: Plugin = (tn: Tabnas, options: XmlOptions) => {
   const embed = options.embed === true
   const decodeEntity = buildEntityDecoder(options)
 
+  // Human descriptions for the XML tokens, surfaced in railroad diagram
+  // legends (read off the live config by @tabnas/railroad).
+  tn.options({
+    config: {
+      modify: {
+        'xml-tokendesc': (cfg: any) => {
+          cfg.tokenDesc = Object.assign(cfg.tokenDesc || {}, {
+            '#XOP': 'XML open tag <name ...>',
+            '#XSC': 'XML self-closing tag <name .../>',
+            '#XCL': 'XML closing tag </name>',
+            '#XIG': 'ignored markup: comment, PI, or DOCTYPE',
+            '#TX': 'text / character data between tags',
+          })
+        },
+      },
+    },
+  })
+
   // Register custom lexer matcher. The same matcher is used in both
   // modes; in embed mode it additionally consumes text between tags so
   // Jsonic's own text/fixed lexers don't split it on `,` `:` etc.
