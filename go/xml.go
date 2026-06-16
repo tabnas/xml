@@ -369,6 +369,14 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 				})
 			})
 		}
+	} else {
+		// Pure XML mode: the `xml` start rule reaches only the XML rules
+		// (element/content/child), so Jsonic's inherited JSON value rules
+		// are unreachable. Remove them so the grammar definition matches
+		// the TypeScript port (Rule(name, nil) deletes the rule).
+		for _, name := range []string{"val", "map", "list", "pair", "elem"} {
+			j.Rule(name, nil)
+		}
 	}
 
 	return nil
