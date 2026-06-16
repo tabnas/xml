@@ -47,7 +47,13 @@ child:
           │
 
 Tokens:
-  TX  = text / character data between tags
+  TX  = text / character data between tags (entities decoded)
   XCL = XML closing tag </name>
   XOP = XML open tag <name ...>
   XSC = XML self-closing tag <name .../>
+
+Ignored tokens:
+  CM  = comment
+  LN  = newline (line break)
+  SP  = whitespace (spaces or tabs)
+  XIG = ignored markup: comment, PI, or DOCTYPE
