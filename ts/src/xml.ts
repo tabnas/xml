@@ -1,16 +1,20 @@
 /* Copyright (c) 2021-2025 Richard Rodger, MIT License */
 
-// Import Jsonic types used by plugins.
+// The engine is the tabnas parser; jsonic supplies the relaxed-JSON
+// grammar that the embedded grammar text is authored in.
+import { Tabnas } from '@tabnas/parser'
+import { jsonic } from '@tabnas/jsonic'
+
+// Engine types used by plugins (re-exported by @tabnas/parser).
 import {
-  Jsonic,
   Rule,
   RuleSpec,
   Plugin,
   Context,
   Config,
-  Options,
+  TabnasOptions,
   Lex,
-} from '@tabnas/jsonic'
+} from '@tabnas/parser'
 
 // A parsed XML element.
 //
@@ -118,14 +122,14 @@ const grammarText = `
 // --- END EMBEDDED xml-grammar.jsonic ---
 
 
-const Xml: Plugin = (jsonic: Jsonic, options: XmlOptions) => {
+const Xml: Plugin = (tn: Tabnas, options: XmlOptions) => {
   const embed = options.embed === true
   const decodeEntity = buildEntityDecoder(options)
 
   // Register custom lexer matcher. The same matcher is used in both
   // modes; in embed mode it additionally consumes text between tags so
   // Jsonic's own text/fixed lexers don't split it on `,` `:` etc.
-  jsonic.options({
+  tn.options({
     lex: {
       match: {
         xmltag: {
@@ -150,7 +154,7 @@ const Xml: Plugin = (jsonic: Jsonic, options: XmlOptions) => {
     // the text tokens (with entity decoding and well-formedness
     // checks); Jsonic's text matcher only sees whitespace before the
     // root and after it, where no decoding is needed.
-    jsonic.options({
+    tn.options({
       rule: {
         start: 'xml',
         exclude: 'jsonic,imp',
@@ -174,7 +178,7 @@ const Xml: Plugin = (jsonic: Jsonic, options: XmlOptions) => {
   } else {
     // Embed mode: keep all of Jsonic's standard grammar. Still register
     // #XIG for comments/PIs/DOCTYPE and add it to IGNORE.
-    jsonic.options({
+    tn.options({
       tokenSet: {
         IGNORE: ['#SP', '#LN', '#CM', '#XIG'],
       },
@@ -182,7 +186,7 @@ const Xml: Plugin = (jsonic: Jsonic, options: XmlOptions) => {
   }
 
   // Error templates and hints are installed in both modes.
-  jsonic.options({
+  tn.options({
     error: {
       xml_mismatched_tag:
         'closing tag </$fsrc> does not match opening tag <$openname>',
@@ -282,10 +286,12 @@ Expected </$openname> but found </$fsrc>.`,
     '@element-is-selfclosed': (r: Rule) => true === !!r.u.selfclose,
   }
 
-  // Parse embedded grammar definition and wire refs.
-  const grammarDef = Jsonic.make()(grammarText)
+  // Parse embedded grammar definition and wire refs. The embedded
+  // relaxed-.jsonic grammar text is parsed by a jsonic-grammar engine,
+  // then installed on this tabnas instance.
+  const grammarDef = new Tabnas().use(jsonic).parse(grammarText)
   grammarDef.ref = refs
-  jsonic.grammar(grammarDef)
+  tn.grammar(grammarDef)
 
   if (embed) {
     // Splice XML literals into the Jsonic `val` rule. When the parser
@@ -293,9 +299,9 @@ Expected </$openname> but found </$fsrc>.`,
     // pushes the `element` rule which builds the XML subtree. Backtrack
     // by 1 so `element.open` can read the same token and dispatch to
     // the correct branch.
-    const XOP = jsonic.token('#XOP')
-    const XSC = jsonic.token('#XSC')
-    jsonic.rule('val', (rs: RuleSpec) => {
+    const XOP = tn.token('#XOP')
+    const XSC = tn.token('#XSC')
+    tn.rule('val', (rs: RuleSpec) => {
       return rs.open(
         [
           { s: [XOP], b: 1, p: 'element', g: 'xml' },
@@ -309,7 +315,7 @@ Expected </$openname> but found </$fsrc>.`,
     // is not invoked. Resolve namespaces after the full tree lands on
     // the element rule by hooking its close-state action.
     if (options.namespaces !== false) {
-      jsonic.rule('element', (rs: RuleSpec) => {
+      tn.rule('element', (rs: RuleSpec) => {
         rs.bc((r: Rule) => {
           if (r.node && 'object' === typeof r.node && r.parent &&
               r.parent.name === 'val') {
@@ -781,7 +787,7 @@ function buildXmlTagMatcher(
     }
   }
 
-  return function makeXmlTagMatcher(_cfg: Config, _opts: Options) {
+  return function makeXmlTagMatcher(_cfg: Config, _opts: TabnasOptions) {
     return function xmlTagMatcher(lex: Lex) {
       const { pnt, src } = lex
       const sI = pnt.sI

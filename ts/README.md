@@ -29,7 +29,7 @@ package on npm and a Go module:
 **TypeScript / JavaScript**
 
 ```sh
-npm install @tabnas/jsonic @tabnas/xml
+npm install @tabnas/parser @tabnas/jsonic @tabnas/xml
 ```
 
 **Go**
@@ -44,12 +44,13 @@ go get github.com/tabnas/xml/go
 **TypeScript**
 
 ```typescript
-import { Jsonic } from '@tabnas/jsonic'
+import { Tabnas } from '@tabnas/parser'
+import { jsonic } from '@tabnas/jsonic'
 import { Xml } from '@tabnas/xml'
 
-const parse = Jsonic.make().use(Xml)
+const xml = new Tabnas().use(jsonic).use(Xml)
 
-parse('<greeting lang="en">Hello, <b>world</b>!</greeting>')
+xml.parse('<greeting lang="en">Hello, <b>world</b>!</greeting>')
 // {
 //   name: 'greeting', localName: 'greeting',
 //   attributes: { lang: 'en' },
@@ -82,6 +83,16 @@ a reference section, and a short explanation of design choices:
 - [TypeScript guide](doc/xml-ts.md)
 - [Go guide](doc/xml-go.md)
 
+
+
+## Grammar diagram
+
+The installed grammar as a railroad/syntax diagram, generated from the live
+grammar with [`@tabnas/railroad`](https://github.com/tabnas/railroad):
+
+![xml grammar railroad diagram](doc/grammar.svg)
+
+A vertical ASCII version is in [`doc/grammar.txt`](doc/grammar.txt).
 
 ## License
 
