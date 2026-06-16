@@ -114,3 +114,17 @@ child:
 ╰───┬──╯   └────┬────┘
     └─────┬─────┘
           │
+
+Tokens:
+  CA  = ,
+  CB  = }
+  CL  = :
+  CS  = ]
+  KEY = map key (text, number, string, or value)
+  OB  = {
+  OS  = [
+  TX  = bare text
+  VAL = a value (text, number, string, or value)
+  XCL = XCL token
+  XOP = XOP token
+  XSC = XSC token
