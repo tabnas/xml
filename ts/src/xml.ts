@@ -137,7 +137,7 @@ const Xml: Plugin = (tn: Tabnas, options: XmlOptions) => {
             '#XSC': 'XML self-closing tag <name .../>',
             '#XCL': 'XML closing tag </name>',
             '#XIG': 'ignored markup: comment, PI, or DOCTYPE',
-            '#TX': 'text / character data between tags',
+            '#TX': 'text / character data between tags (entities decoded)',
           })
         },
       },
