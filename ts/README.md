@@ -1,104 +1,67 @@
 # @tabnas/xml
 
-A [Jsonic](https://jsonic.senecajs.org) syntax plugin that parses
-XML text into a tree of elements, with support for attributes, mixed
-content, namespaces, entities, CDATA sections, comments, processing
-instructions, and DOCTYPE declarations.
+A [Jsonic](https://jsonic.senecajs.org) grammar plugin that parses XML
+text into a tree of elements, with support for attributes, mixed content,
+namespaces, entities, CDATA sections, comments, processing instructions,
+and DOCTYPE declarations.
 
-The same parser is available in two languages — a TypeScript/JavaScript
-package on npm and a Go module:
-
-| Language   | Package                                                     | Source                                                       |
-| ---------- | ----------------------------------------------------------- | ------------------------------------------------------------ |
-| TypeScript | [`@tabnas/xml`](https://npmjs.com/package/@tabnas/xml)      | [`src/xml.ts`](src/xml.ts)                                   |
-| Go         | [`github.com/tabnas/xml/go`](https://github.com/tabnas/xml/tree/main/go) | [`go/xml.go`](go/xml.go)            |
+This is the TypeScript / JavaScript package. A Go port lives in
+[`../go`](../go) (see [its README](../go/README.md)).
 
 [![npm version](https://img.shields.io/npm/v/@tabnas/xml.svg)](https://npmjs.com/package/@tabnas/xml)
 [![build](https://github.com/tabnas/xml/actions/workflows/build.yml/badge.svg)](https://github.com/tabnas/xml/actions/workflows/build.yml)
-[![Coverage Status](https://coveralls.io/repos/github/tabnas/xml/badge.svg?branch=main)](https://coveralls.io/github/tabnas/xml?branch=main)
-[![Known Vulnerabilities](https://snyk.io/test/github/tabnas/xml/badge.svg)](https://snyk.io/test/github/tabnas/xml)
-[![DeepScan grade](https://deepscan.io/api/teams/5016/projects/22466/branches/663906/badge/grade.svg)](https://deepscan.io/dashboard#view=project&tid=5016&pid=22466&bid=663906)
-[![Maintainability](https://api.codeclimate.com/v1/badges/10e9bede600896c77ce8/maintainability)](https://codeclimate.com/github/tabnas/xml/maintainability)
-
-| ![Voxgig](https://www.voxgig.com/res/img/vgt01r.png) | This open source module is sponsored and supported by [Voxgig](https://www.voxgig.com). |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------- |
-
 
 ## Install
-
-**TypeScript / JavaScript**
 
 ```sh
 npm install @tabnas/parser @tabnas/jsonic @tabnas/xml
 ```
 
-**Go**
+`@tabnas/parser` (the engine) and `@tabnas/jsonic` (the base grammar) are
+peer dependencies.
 
-```sh
-go get github.com/tabnas/xml/go
-```
+## Example
 
-
-## Quick example
-
-**TypeScript**
-
-```typescript
-import { Tabnas } from '@tabnas/parser'
-import { jsonic } from '@tabnas/jsonic'
-import { Xml } from '@tabnas/xml'
+```js
+const { Tabnas } = require('@tabnas/parser')
+const { jsonic } = require('@tabnas/jsonic')
+const { Xml } = require('@tabnas/xml')
 
 const xml = new Tabnas().use(jsonic).use(Xml)
 
-xml.parse('<greeting lang="en">Hello, <b>world</b>!</greeting>')
-// {
-//   name: 'greeting', localName: 'greeting',
-//   attributes: { lang: 'en' },
-//   children: [ 'Hello, ',
-//               { name: 'b', localName: 'b', attributes: {}, children: ['world'] },
-//               '!' ]
-// }
+xml.parse('<a>Tom &amp; Jerry</a>').children   // => ['Tom & Jerry']
 ```
 
-**Go**
-
-```go
-import (
-    jsonic "github.com/tabnas/jsonic/go"
-    xml "github.com/tabnas/xml/go"
-)
-
-j := jsonic.Make()
-j.UseDefaults(xml.Xml, xml.Defaults)
-result, _ := j.Parse(`<greeting lang="en">Hello, <b>world</b>!</greeting>`)
-```
-
+The result is an `XmlElement` tree: each element has `name`, `localName`,
+`attributes`, `children`, and — where they apply — `prefix`,
+`namespace`, `space`, and `lang`.
 
 ## Documentation
 
-Documentation is organised by the [Diataxis](https://diataxis.fr)
-framework — each language guide contains a tutorial, how-to recipes,
-a reference section, and a short explanation of design choices:
+Organised by the [Diátaxis](https://diataxis.fr) framework:
 
-- [TypeScript guide](doc/xml-ts.md)
-- [Go guide](doc/xml-go.md)
-
-
+- [Tutorial](doc/tutorial.md) — a guided first parse.
+- [How-to guide](doc/guide.md) — task recipes (options, errors, embed
+  mode).
+- [Reference](doc/reference.md) — the public API, every option, and the
+  accepted XML syntax.
+- [Concepts](doc/concepts.md) — how the parser works on the engine, and
+  why.
 
 ## Grammar diagram
 
-The installed grammar as a railroad/syntax diagram, generated from the live
-grammar with [`@tabnas/railroad`](https://github.com/tabnas/railroad):
+The installed grammar as a railroad/syntax diagram, generated from the
+live grammar with
+[`@tabnas/railroad`](https://github.com/tabnas/railroad):
 
 ![xml grammar railroad diagram](doc/grammar.svg)
 
-A vertical ASCII version is in [`doc/grammar.txt`](doc/grammar.txt).
-
-The grammar source lives in the repository's top-level
-`xml-grammar.jsonic` and is embedded into [`src/xml.ts`](src/xml.ts) by
-`embed-grammar.js` (run via `npm run build` or `npm run embed`).
+A vertical ASCII version is in [`doc/grammar.txt`](doc/grammar.txt). The
+grammar source lives in the repository's top-level `xml-grammar.jsonic`
+and is embedded into [`src/xml.ts`](src/xml.ts) by `embed-grammar.js`
+(run via `npm run build` or `npm run embed`).
 
 ## License
 
-Copyright (c) 2021-2025 Richard Rodger and other contributors,
+Copyright (c) Richard Rodger and other contributors,
 [MIT License](LICENSE).
