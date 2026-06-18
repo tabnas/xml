@@ -1,6 +1,6 @@
 # @tabnas/xml
 
-A [Jsonic](https://jsonic.senecajs.org) grammar plugin that parses XML
+A [Jsonic](https://github.com/tabnas/jsonic) grammar plugin that parses XML
 text into a tree of elements, with support for attributes, mixed content,
 namespaces, entities, CDATA sections, comments, processing instructions,
 and DOCTYPE declarations.
