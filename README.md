@@ -44,12 +44,12 @@ xml.parse('<greeting lang="en">Hi <b>world</b></greeting>')
 
 ```go
 import (
-	jsonic "github.com/tabnas/jsonic/go"
-	xml "github.com/tabnas/xml/go"
+	tabnasjsonic "github.com/tabnas/jsonic/go"
+	tabnasxml "github.com/tabnas/xml/go"
 )
 
-j := jsonic.Make()
-j.UseDefaults(xml.Xml, xml.Defaults)
+j := tabnasjsonic.Make()
+j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults)
 result, _ := j.Parse(`<greeting lang="en">Hi <b>world</b></greeting>`)
 ```
 

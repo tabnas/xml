@@ -9,12 +9,12 @@ Every recipe starts from a parser built like this:
 
 ```go
 import (
-	jsonic "github.com/tabnas/jsonic/go"
-	xml "github.com/tabnas/xml/go"
+	tabnasjsonic "github.com/tabnas/jsonic/go"
+	tabnasxml "github.com/tabnas/xml/go"
 )
 
-j := jsonic.Make()
-if err := j.UseDefaults(xml.Xml, xml.Defaults); err != nil {
+j := tabnasjsonic.Make()
+if err := j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults); err != nil {
 	panic(err)
 }
 ```
@@ -57,8 +57,8 @@ Declare extra named entities with the `customEntities` option (itself a
 named reference appears:
 
 ```go
-j := jsonic.Make()
-j.UseDefaults(xml.Xml, xml.Defaults, map[string]any{
+j := tabnasjsonic.Make()
+j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults, map[string]any{
 	"customEntities": map[string]string{"nbsp": " ", "copy": "©"},
 })
 
@@ -74,8 +74,8 @@ By default a reference to an undeclared named entity is a hard error
 sequences should pass through untouched, set `strictEntities: false`:
 
 ```go
-j := jsonic.Make()
-j.UseDefaults(xml.Xml, xml.Defaults, map[string]any{"strictEntities": false})
+j := tabnasjsonic.Make()
+j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults, map[string]any{"strictEntities": false})
 
 result, _ := j.Parse(`<a>&unknown;</a>`)
 children := result.(map[string]any)["children"].([]any)
@@ -91,8 +91,8 @@ To keep text and attribute values byte-for-byte as written, set
 `entities: false`:
 
 ```go
-j := jsonic.Make()
-j.UseDefaults(xml.Xml, xml.Defaults, map[string]any{"entities": false})
+j := tabnasjsonic.Make()
+j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults, map[string]any{"entities": false})
 
 result, _ := j.Parse(`<a>&amp;</a>`)
 children := result.(map[string]any)["children"].([]any)
@@ -106,8 +106,8 @@ rejects unbound prefixes. To skip it — leaving `xmlns` declarations as
 plain attributes — set `namespaces: false`:
 
 ```go
-j := jsonic.Make()
-j.UseDefaults(xml.Xml, xml.Defaults, map[string]any{"namespaces": false})
+j := tabnasjsonic.Make()
+j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults, map[string]any{"namespaces": false})
 
 result, _ := j.Parse(`<a xmlns="http://example.com"/>`)
 el := result.(map[string]any)
@@ -153,8 +153,8 @@ adds XML literals as values: an `<tag>…</tag>` (or `<tag/>`) may appear
 anywhere Jsonic expects a value. Plain Jsonic input is unaffected:
 
 ```go
-j := jsonic.Make()
-j.UseDefaults(xml.Xml, xml.Defaults, map[string]any{"embed": true})
+j := tabnasjsonic.Make()
+j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults, map[string]any{"embed": true})
 
 r1, _ := j.Parse(`{a:1, b:"two"}`)
 // r1 == map[string]any{"a": float64(1), "b": "two"}
@@ -174,14 +174,14 @@ children := r.(map[string]any)["children"].([]any)
 
 ## Decode a file of unknown encoding
 
-XML files may carry a UTF-8/16/32 byte-order mark. `xml.DecodeBOM`
+XML files may carry a UTF-8/16/32 byte-order mark. `tabnasxml.DecodeBOM`
 detects it and returns a decoded UTF-8 string ready to parse:
 
 ```go
 import "os"
 
 body, _ := os.ReadFile("doc.xml")
-result, err := j.Parse(xml.DecodeBOM(string(body)))
+result, err := j.Parse(tabnasxml.DecodeBOM(string(body)))
 ```
 
 With no recognised BOM the input is returned unchanged (UTF-8 assumed),

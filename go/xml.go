@@ -1,6 +1,6 @@
 // Copyright (c) 2021-2025 Richard Rodger, MIT License
 
-// Package xml is a Jsonic plugin that parses XML into a tree of
+// Package tabnasxml is a Jsonic plugin that parses XML into a tree of
 // elements. The parser supports: elements with open/close and
 // self-closing tags, attributes (single and double quoted with entity
 // decoding), mixed element/text content, predefined and numeric
@@ -12,7 +12,7 @@
 // `localName`, optional `prefix`, optional `namespace`, `attributes`
 // (map of string -> string) and `children` (array of nested elements
 // or text strings).
-package xml
+package tabnasxml
 
 import (
 	"encoding/binary"

@@ -18,18 +18,18 @@ dependency.
 
 ```go
 import (
-	jsonic "github.com/tabnas/jsonic/go"
-	xml "github.com/tabnas/xml/go"
+	tabnasjsonic "github.com/tabnas/jsonic/go"
+	tabnasxml "github.com/tabnas/xml/go"
 )
 ```
 
 | Symbol                | Kind                                              | Purpose                                          |
 | --------------------- | ------------------------------------------------- | ------------------------------------------------ |
-| `xml.Xml`             | `func(*jsonic.Jsonic, map[string]any) error`      | The plugin. Register with `UseDefaults`.         |
-| `xml.Defaults`        | `map[string]any`                                  | Default option values to pass to `UseDefaults`.  |
-| `xml.DecodeBOM`       | `func(string) string`                             | Strip/transcode a byte-order mark before parse.  |
-| `xml.EntityDecoder`   | `func(string, map[string]string) string`          | The entity-decoder function type (advanced).     |
-| `xml.Version`         | `string`                                          | The module version string.                       |
+| `tabnasxml.Xml`             | `func(*tabnasjsonic.Jsonic, map[string]any) error`      | The plugin. Register with `UseDefaults`.         |
+| `tabnasxml.Defaults`        | `map[string]any`                                  | Default option values to pass to `UseDefaults`.  |
+| `tabnasxml.DecodeBOM`       | `func(string) string`                             | Strip/transcode a byte-order mark before parse.  |
+| `tabnasxml.EntityDecoder`   | `func(string, map[string]string) string`          | The entity-decoder function type (advanced).     |
+| `tabnasxml.Version`         | `string`                                          | The module version string.                       |
 
 ## Parse entry
 
@@ -37,8 +37,8 @@ The plugin has no standalone parse function. Make a `jsonic` instance,
 register the plugin with `UseDefaults`, and call `Parse`:
 
 ```go
-j := jsonic.Make()
-if err := j.UseDefaults(xml.Xml, xml.Defaults /*, overrides */); err != nil {
+j := tabnasjsonic.Make()
+if err := j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults /*, overrides */); err != nil {
 	// plugin init failed
 }
 result, err := j.Parse(source) // source: string
@@ -93,7 +93,7 @@ remain in `attributes`; their effects are surfaced via `namespace` /
 
 ## Options
 
-Pass options as a `map[string]any` to `UseDefaults` after `xml.Defaults`.
+Pass options as a `map[string]any` to `UseDefaults` after `tabnasxml.Defaults`.
 All are optional; defaults shown.
 
 | Key              | Type                | Default             | Effect                                                                 |
