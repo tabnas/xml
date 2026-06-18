@@ -6,7 +6,7 @@
 const fs = require('fs')
 const path = require('path')
 
-const GRAMMAR_FILE = path.join(__dirname, 'xml-grammar.jsonic')
+const GRAMMAR_FILE = path.join(__dirname, '..', 'xml-grammar.jsonic')
 const TS_FILE = path.join(__dirname, 'src', 'xml.ts')
 
 const BEGIN = '// --- BEGIN EMBEDDED xml-grammar.jsonic ---'
