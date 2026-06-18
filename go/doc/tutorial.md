@@ -22,7 +22,7 @@ see the sibling-checkout note in the [README](../README.md).)
 
 ## 2. Parse an element
 
-`xml.Xml` is a plugin. Register it on a `jsonic` instance with
+`tabnasxml.Xml` is a plugin. Register it on a `jsonic` instance with
 `UseDefaults`, then call `Parse`:
 
 ```go
@@ -31,13 +31,13 @@ package main
 import (
 	"fmt"
 
-	jsonic "github.com/tabnas/jsonic/go"
-	xml "github.com/tabnas/xml/go"
+	tabnasjsonic "github.com/tabnas/jsonic/go"
+	tabnasxml "github.com/tabnas/xml/go"
 )
 
 func main() {
-	j := jsonic.Make()
-	if err := j.UseDefaults(xml.Xml, xml.Defaults); err != nil {
+	j := tabnasjsonic.Make()
+	if err := j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults); err != nil {
 		panic(err)
 	}
 

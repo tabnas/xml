@@ -30,13 +30,13 @@ package main
 import (
 	"fmt"
 
-	jsonic "github.com/tabnas/jsonic/go"
-	xml "github.com/tabnas/xml/go"
+	tabnasjsonic "github.com/tabnas/jsonic/go"
+	tabnasxml "github.com/tabnas/xml/go"
 )
 
 func main() {
-	j := jsonic.Make()
-	if err := j.UseDefaults(xml.Xml, xml.Defaults); err != nil {
+	j := tabnasjsonic.Make()
+	if err := j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults); err != nil {
 		panic(err)
 	}
 
