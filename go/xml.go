@@ -264,7 +264,7 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 			el, _ := r.Node.(map[string]any)
 			children, _ := el["children"].([]any)
 			el["children"] = append(children, r.O0.Val)
-			r.U["done"] = true
+			r.EnsureU()["done"] = true
 		}),
 
 		"@child-bc": jsonic.StateAction(func(r *jsonic.Rule, ctx *jsonic.Context) {
