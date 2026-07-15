@@ -1,5 +1,12 @@
 # @tabnas/xml
 
+<!-- tabnas-badges -->
+[![npm](https://tabnas.github.io/status/badges/xml-npm.svg)](https://www.npmjs.com/package/@tabnas/xml)
+[![CI](https://github.com/tabnas/xml/actions/workflows/ci.yml/badge.svg)](https://github.com/tabnas/xml/actions/workflows/ci.yml)
+[![go](https://tabnas.github.io/status/badges/xml-go.svg)](https://pkg.go.dev/github.com/tabnas/xml/go)
+[![tabnas standard](https://tabnas.github.io/status/badges/xml-standard.svg)](https://tabnas.github.io/status/)
+<!-- /tabnas-badges -->
+
 A grammar plugin for the [Jsonic](https://github.com/tabnas/jsonic) parser
 engine that parses XML text into a tree of elements — attributes, mixed
 content, namespaces, entities, CDATA, comments, PIs, and DOCTYPE. The
