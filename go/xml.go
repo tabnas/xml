@@ -1271,9 +1271,9 @@ func checkEntityRefs(s string, dtd, declared map[string]string, strict bool) str
 
 // xmlScope tracks state inherited down an XML tree:
 //
-//   ns    - prefix -> namespace URI (XML Namespaces 1.0)
-//   space - active xml:space value (XML 1.0 §2.10)
-//   lang  - active xml:lang value (XML 1.0 §2.12)
+//	ns    - prefix -> namespace URI (XML Namespaces 1.0)
+//	space - active xml:space value (XML 1.0 §2.10)
+//	lang  - active xml:lang value (XML 1.0 §2.12)
 //
 // `space` and `lang` are recorded on each element only when they
 // are non-default, so plain documents don't sprout extra fields.
