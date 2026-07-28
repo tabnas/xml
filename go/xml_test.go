@@ -13,6 +13,19 @@ import (
 	jsonic "github.com/tabnas/jsonic/go"
 )
 
+// asMap returns the string-keyed map underlying a parsed object,
+// accepting both the insertion-ordered *jsonic.OrderedMap that the parser
+// now produces for JSON/Jsonic objects and a plain map[string]any (which
+// the XML plugin still uses for element nodes it builds itself). It lets
+// value assertions work regardless of which shape a given node is.
+func asMap(v any) map[string]any {
+	if om, ok := v.(*jsonic.OrderedMap); ok {
+		return om.Vals
+	}
+	m, _ := v.(map[string]any)
+	return m
+}
+
 // specEntry represents one row of a TSV spec file.
 type specEntry struct {
 	File     string
@@ -222,8 +235,8 @@ func TestEmbedPlainJsonicStillWorks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	m, ok := got.(map[string]any)
-	if !ok {
+	m := asMap(got)
+	if m == nil {
 		t.Fatalf("expected map, got %T", got)
 	}
 	if m["a"] != float64(1) || m["b"] != "two" {
@@ -263,7 +276,7 @@ func TestEmbedXmlInsideJsonicMap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	m := got.(map[string]any)
+	m := asMap(got)
 	if m["title"] != "order-42" {
 		t.Fatalf("title: got %v", m["title"])
 	}
@@ -343,7 +356,7 @@ func TestEmbedXmlNamespacesResolve(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	doc := got.(map[string]any)["doc"].(map[string]any)
+	doc := asMap(got)["doc"].(map[string]any)
 	if doc["namespace"] != "http://e.example" {
 		t.Fatalf("doc.namespace: %v", doc["namespace"])
 	}
