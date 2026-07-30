@@ -203,13 +203,22 @@ func runSpecFile(t *testing.T, path string) {
 	}
 }
 
-func TestBasicSpec(t *testing.T)      { runSpecFile(t, filepath.Join(specDir(), "basic.tsv")) }
-func TestAttributesSpec(t *testing.T) { runSpecFile(t, filepath.Join(specDir(), "attributes.tsv")) }
-func TestEntitiesSpec(t *testing.T)   { runSpecFile(t, filepath.Join(specDir(), "entities.tsv")) }
-func TestNamespacesSpec(t *testing.T) { runSpecFile(t, filepath.Join(specDir(), "namespaces.tsv")) }
-func TestStructureSpec(t *testing.T)  { runSpecFile(t, filepath.Join(specDir(), "structure.tsv")) }
-func TestErrorsSpec(t *testing.T)     { runSpecFile(t, filepath.Join(specDir(), "errors.tsv")) }
-func TestW3CSpec(t *testing.T)        { runSpecFile(t, filepath.Join(specDir(), "w3c.tsv")) }
+// TestSpec auto-discovers every fixture under test/spec, exactly as the
+// TypeScript runner does. The hand-written list this replaces had gone stale:
+// dtd-attlist.tsv, dtd-entities.tsv and xmlspace-lang.tsv were run by
+// TypeScript alone, so nothing held the Go port to them.
+func TestSpec(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join(specDir(), "*.tsv"))
+	if err != nil {
+		t.Fatalf("glob spec dir: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatalf("no spec files under %s", specDir())
+	}
+	for _, path := range files {
+		t.Run(filepath.Base(path), func(t *testing.T) { runSpecFile(t, path) })
+	}
+}
 
 // --- XML literals embedded in Jsonic source --------------------------------
 //
