@@ -45,5 +45,7 @@ exact output. Behavioural cases belong here in `spec/`.
 - TypeScript is canonical. If the two runtimes disagree, the TS behaviour is
   the expected value — unless Go has exposed a genuine TS defect, in which
   case fix TS first and pin the corrected behaviour here.
-- A new fixture must pass in BOTH runtimes: run `go test ./...` (from `go/`)
-  and `npm test` (from `ts/`) before considering it done.
+- A new fixture must pass in BOTH runtimes before it counts:
+  `go test ./...` from `go/`, and **`npm run build && npm test`** from `ts/`.
+  Plain `npm test` runs the previously compiled `dist-test/`, so it can pass
+  without ever loading a newly added fixture.
