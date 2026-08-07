@@ -11,6 +11,42 @@ on:
 
 jobs:
   ci:
+    # The W3C XML conformance corpus is fetched BEFORE the tests inside the
+    # reusable workflow, without needing to change it:
+    #   ts/  - the `pretest` npm script runs scripts/fetch-xml-suite.sh
+    #   go/  - TestMain in go/xmlconf_test.go runs it
+    # If the corpus is absent the conformance tests FAIL LOUDLY; they never
+    # skip. The previous arrangement had CI silently not running them at all.
     uses: tabnas/.github/.github/workflows/polyglot-ci.yml@main
     with:
       deps: "parser debug json abnf railroad jsonic"
+
+  # Independent gate on the corpus itself. The conformance numbers in this
+  # repository are only meaningful against one exact snapshot, so verify that
+  # the pinned archive is still fetchable and still hashes to the recorded
+  # SHA-256, and that the catalog census has not moved. This job does not
+  # need the tabnas sibling closure, so it fails fast and unambiguously when
+  # the problem is upstream rather than in the parser.
+  conformance-corpus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Fetch the pinned W3C XML Conformance Test Suite
+        run: bash scripts/fetch-xml-suite.sh
+      - name: Verify the corpus census
+        run: |
+          test -f test/xmlconf/xmlconf.xml
+          count=$(grep -rho '<TEST\b' test/xmlconf --include='*.xml' | wc -l)
+          echo "catalog <TEST> entries: $count"
+          if [ "$count" -ne 2586 ]; then
+            echo "ERROR: expected 2586 catalogued tests, found $count." >&2
+            echo "The pinned corpus changed. Do not silently accept a smaller suite." >&2
+            exit 1
+          fi
+      - name: Corpus must never be committed
+        run: |
+          if git ls-files --error-unmatch test/xmlconf >/dev/null 2>&1; then
+            echo "ERROR: test/xmlconf is tracked by git. The W3C suite is not" >&2
+            echo "redistributed by this repository; it must stay gitignored." >&2
+            exit 1
+          fi

@@ -33,12 +33,26 @@ function loadDebug(): any {
 }
 
 const Debug = loadDebug()
-const skip = Debug
-  ? false
-  : '@tabnas/debug not available (set TABNAS_DEBUG_PATH)'
+
+// @tabnas/debug is a declared devDependency and CI builds it as a sibling,
+// so it is always meant to be present. This test used to carry
+//   const skip = Debug ? false : '@tabnas/debug not available'
+// and pass `{ skip }` to every case, which meant a broken dependency graph
+// turned into a green tick reporting nothing. Fail loudly instead: a test
+// that quietly does not run is the same defect class as a swallowed failure.
+if (!Debug) {
+  throw new Error(
+    '@tabnas/debug could not be resolved, so the xml+debug composition test ' +
+      'cannot run.\n' +
+      '  it is a devDependency of ts/package.json and must be installed.\n' +
+      '  fix: build the sibling checkout (../../debug/ts) and re-link, or set ' +
+      'TABNAS_DEBUG_PATH to a built copy.\n' +
+      '  this test does NOT skip.',
+  )
+}
 
 describe('compose: xml + @tabnas/debug', () => {
-  test('parses normally with the debug plugin installed', { skip }, () => {
+  test('parses normally with the debug plugin installed', () => {
     const tn = new Tabnas().use(jsonic).use(Xml)
     tn.use(Debug, { print: false, trace: false })
     assert.deepEqual(JSON.parse(JSON.stringify(tn.parse('<a>hello</a>'))), {
@@ -49,7 +63,7 @@ describe('compose: xml + @tabnas/debug', () => {
     })
   })
 
-  test('debug.model() returns the structured xml grammar', { skip }, () => {
+  test('debug.model() returns the structured xml grammar', () => {
     const tn = new Tabnas().use(jsonic).use(Xml)
     tn.use(Debug, { print: false, trace: false })
     const m = tn.debug.model()

@@ -33,9 +33,33 @@ both runtimes without touching either runner. (The Go side used to name each
 file by hand, and that list had gone stale — `dtd-attlist`, `dtd-entities`
 and `xmlspace-lang` were running in TypeScript only.)
 
-`test/xmlconf/` is separate: the W3C conformance suite, fetched on demand by
-`scripts/fetch-xml-suite.sh` and checked against pass-rate floors rather than
-exact output. Behavioural cases belong here in `spec/`.
+`test/xmlconf/` is separate: the W3C XML Conformance Test Suite. It is
+**never committed** (W3C-owned, not redistributed) — `scripts/fetch-xml-suite.sh`
+downloads the pinned `xmlts20130923.tar.gz`, verifies its SHA-256, and
+extracts it into the gitignored `test/xmlconf/`. The fetch runs automatically
+before the tests (`pretest` in `ts/package.json`, `TestMain` in
+`go/xmlconf_test.go`) and the tests **fail loudly** if the corpus is absent.
+They never skip. Behavioural cases still belong here in `spec/`.
+
+## The conformance baseline (measured 2026-08-07, parser unchanged)
+
+Catalog: 2586 tests, of which 2312 are in scope (RECOMMENDATION XML1.0 —
+all errata editions — or NS1.0; XML1.1 / NS1.1 are a different language
+version this package does not claim). `error`-type tests (28) are not
+asserted: the spec leaves reporting to the processor's discretion.
+
+| measure | TypeScript | Go |
+|---|---|---|
+| `valid` accepted **and** canonical output matched | 621 / 729 (85.2%) | 623 / 729 (85.5%) |
+| — of which merely parsed | 697 / 729 | 699 / 729 |
+| — value-compared (catalog supplies OUTPUT) | 232 / 308 | 232 / 308 |
+| `not-wf` rejected | **404 / 1326 (30.5%)** | **405 / 1326 (30.5%)** |
+| `invalid` accepted (non-validating) | 216 / 229 (94.3%) | 216 / 229 (94.3%) |
+
+The old harness reported this same parser as green, because it asserted
+`>= 118/120` valid and `>= 30/186` not-wf over two directories of one
+collection, and never compared a value. Do not restore floors, skips or
+allow-lists. Leave a genuine gap RED.
 
 ## Rules
 

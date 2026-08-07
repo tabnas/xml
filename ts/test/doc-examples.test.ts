@@ -116,6 +116,13 @@ function importsToRequire(code) {
 
 // Rewrite `<expr>  // => <expected>` lines into __eq(expr, expected) calls.
 const ARROW = /\/\/\s*=>(.*)$/
+// ARROW is applied line by line, where `$` is the end of the line. The
+// block-level "does this example claim an expected value?" check used
+// ARROW.test() on the whole joined block, where `$` is the end of the WHOLE
+// STRING — so a block whose `// =>` was not on its final line was silently
+// dropped and never tested at all (the root README example was one of them).
+// Detect with an anchorless pattern.
+const ARROW_ANY = /\/\/\s*=>/
 function rewriteAssertions(code) {
   let count = 0
   const out = code.split('\n').map((line) => {
@@ -164,6 +171,12 @@ function makeRequire() {
 describe('doc-examples', () => {
   const files = collectMarkdown()
   let testable = 0
+  // Blocks that advertise an expected value with `// =>` but from which no
+  // assertion could be built (e.g. the value is written across several
+  // comment lines). Those used to vanish silently, so a documented example
+  // could be wrong forever without any test noticing. They are now reported
+  // as a failure, not skipped.
+  const unasserted = []
 
   for (const file of files) {
     const rel = path.relative(REPO, file)
@@ -171,11 +184,14 @@ describe('doc-examples', () => {
     blocks.forEach((b, bi) => {
       if (b.ignore) return
       const joined = b.code.join('\n')
-      if (!ARROW.test(joined)) return // no assertions -> skip
+      if (!ARROW_ANY.test(joined)) return // genuinely illustrative: no `// =>`
       const { code, count } = rewriteAssertions(importsToRequire(joined))
-      if (count === 0) return
-      testable++
       const label = `${rel} block #${bi + 1} (line ${b.startLine})`
+      if (count === 0) {
+        unasserted.push(label)
+        return
+      }
+      testable++
       it(label, () => {
         const isAsync = /\bawait\b/.test(code)
         const body = isAsync ? `return (async () => {\n${code}\n})()` : code
@@ -185,8 +201,24 @@ describe('doc-examples', () => {
     })
   }
 
-  it('found at least one tested example (sanity)', () => {
-    // Not a hard failure if a repo has no `// =>` examples yet.
-    assert.ok(testable >= 0, `tested ${testable} doc example block(s)`)
+  it('at least one documented example is actually asserted', () => {
+    // Was `assert.ok(testable >= 0, ...)` — a count is always >= 0, so that
+    // assertion could not fail. If the extractor ever stopped finding any
+    // example the suite stayed green while testing nothing.
+    assert.ok(
+      0 < testable,
+      `no documented example was asserted (found ${files.length} markdown file(s)). ` +
+        'Either the docs lost their `// =>` examples or the extractor regressed.',
+    )
+  })
+
+  it('every `// =>` example yields a real assertion', () => {
+    assert.deepStrictEqual(
+      unasserted,
+      [],
+      'these documented blocks contain `// =>` but produced no assertion, ' +
+        'so their stated output is never checked:\n  ' +
+        unasserted.join('\n  '),
+    )
   })
 })

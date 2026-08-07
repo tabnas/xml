@@ -98,10 +98,19 @@ builds them first.
    (`xml-grammar.jsonic` is parsed at runtime in TS; Go reproduces the
    same rule chain in `xml.go`). The rule pruning, token set, and element
    shape must match across runtimes.
-5. The parser deliberately does **not** implement every XML 1.0
+5. The parser does **not** currently implement every XML 1.0
    well-formedness constraint (no character-legality validation, no full
-   `--`-in-comment checks). That is intentional; the W3C conformance tests
-   are regression floors, not a 100%-conformance target (see below).
+   `--`-in-comment checks, no anchoring of the document to end-of-input,
+   no parsing of internal-entity replacement text as markup).
+   This used to be recorded here as "intentional", with the W3C conformance
+   tests reduced to regression *floors*. That framing hid the size of the
+   gap: measured honestly against the full W3C catalog, the parser rejects
+   only **~30% of not-well-formed documents** (see `test/AGENTS.md`).
+   The published claim in `README.md` is unqualified ("parses XML text"),
+   so the conformance target is XML 1.0 well-formedness, and
+   `ts/test/xmlconf.test.ts` / `go/xmlconf_test.go` assert exactly that.
+   Those suites are currently RED on purpose. Do not add floors, skips or
+   allow-lists to make them green.
 
 ## Pruning jsonic's value rules (pure mode)
 
@@ -134,9 +143,13 @@ token names shown in `ts/doc/grammar.svg`.
 
 - `ts/test/xml.test.ts` — the shared `.tsv` runner plus embedded-XML and
   BOM cases.
+- `ts/test/xmlconf.test.ts` — the W3C XML Conformance Test Suite,
+  catalog-driven (see below).
 - `ts/test/debug-model.test.ts` — composition with `@tabnas/debug`. It
-  resolves the debug plugin dynamically and **skips** when it is absent
-  (set `TABNAS_DEBUG_PATH` to a built sibling). It asserts the rule set
+  resolves the debug plugin dynamically and **fails loudly** when it is
+  absent (set `TABNAS_DEBUG_PATH` to a built sibling); it used to skip,
+  which turned a broken dependency graph into a green tick.
+  It asserts the rule set
   (`child`/`content`/`element`/`xml`), `m.config.start === 'xml'` (note
   `config.start`, not `m.start`), that `Xml` is in `m.plugins`, and the
   push edges (`xml` pushes `element`, `content` pushes `child`).
@@ -144,13 +157,43 @@ token names shown in `ts/doc/grammar.svg`.
   `// =>` from the READMEs/docs and checks each assertion (the standard
   tabnas doc-example harness).
 - `go/xml_test.go` — the Go unit tests + per-file `.tsv` spec runners.
-- `go/xmlconf_test.go` — the W3C XML Conformance Suite (xmltest). The
-  suite is **not bundled**; run `scripts/fetch-xml-suite.sh` to download
-  it into `test/xmlconf/`. When absent the tests `t.Skip`. When present
-  they assert pass/reject **floors** (`validSaPassFloor = 118`,
-  `notWfSaRejectFloor = 30`) — regression guards, not exact counts. Raise
-  a floor when conformance genuinely improves; don't lower one to make a
-  regression pass.
+- `go/xmlconf_test.go` — the W3C XML Conformance Suite, Go half. Mirrors
+  `ts/test/xmlconf.test.ts`; the two must stay in the same scope or the
+  TS/Go parity claim is meaningless.
+
+### The W3C conformance suites
+
+The corpus is **never committed** (W3C-owned, not redistributed).
+`scripts/fetch-xml-suite.sh` downloads the pinned snapshot
+`xmlts20130923.tar.gz`, verifies its SHA-256, and extracts it into the
+gitignored `test/xmlconf/`. It is run automatically before the tests: by
+the `pretest` npm script on the TypeScript side and by `TestMain` on the
+Go side. If the corpus cannot be obtained the tests **fail**; they never
+skip.
+
+Both runners read `xmlconf.xml`, resolve its sub-catalogs, and assert
+**every** catalogued document individually:
+
+| catalog `TYPE` | required behaviour |
+|---|---|
+| `valid` | accepted, and where the catalog gives an `OUTPUT` the parse result must serialise to that exact canonical XML |
+| `invalid` | accepted (this is a non-validating processor) |
+| `not-wf` | rejected |
+| `error` | not asserted at all — reporting is at the processor's discretion. Deliberately not turned into a test that asserts nothing. |
+
+Scope is `RECOMMENDATION` = XML1.0 (all errata editions) or NS1.0: 2312
+of the catalog's 2586 tests. XML1.1 / NS1.1 are a different language
+version this package does not claim.
+
+What was there before, and why it was replaced: the suite skipped when
+the corpus was absent (and CI never fetched it, so it never ran);
+it asserted *floors* (`validSaPassFloor = 118`, `notWfSaRejectFloor = 30`
+out of 186 — a floor that cannot fail); it looked only at
+`xmltest/valid/sa` and `xmltest/not-wf/sa`, ignoring ~2200 other
+documents; and for valid documents it asserted only that parsing did not
+throw, never the resulting value. **Do not reintroduce floors, skips or
+allow-lists.** A red conformance number is honest; a green one that
+cannot fail is not.
 
 ## Build & test
 
@@ -192,9 +235,17 @@ its `package.json` version (currently `0.1.1`).
   `npm i && npm run build --if-present` for each of
   `parser debug json abnf railroad jsonic xml` in order, and finally
   `npm test` in `xml/ts`. Because `@tabnas/debug` is a devDependency, the
-  `debug-model` composition test runs as part of `npm test`.
+  `debug-model` composition test runs as part of `npm test`. `npm test`
+  also runs the `pretest` hook, which fetches the W3C conformance corpus,
+  so the conformance suite runs in CI.
+- **conformance-corpus** (Ubuntu): an independent gate that runs
+  `scripts/fetch-xml-suite.sh`, checks the pinned SHA-256 still matches,
+  checks the catalog census is still 2586 tests, and checks that
+  `test/xmlconf/` is not tracked by git.
 - **build-go** (Ubuntu/macOS, Go 1.24): clones the same siblings, then
   (mirroring `admin/scripts/link.sh`) creates `vendor/` symlinks for any
   `../vendor/` replaces and a `go work` over every non-vendor-replaced
-  module, then `go build ./...` / `go test -v ./...` in `xml/go`. The W3C
-  conformance suite is not fetched in CI, so those tests skip.
+  module, then `go build ./...` / `go test -v ./...` in `xml/go`.
+  `TestMain` fetches the W3C conformance corpus before any test runs, so
+  the conformance suite runs in CI too — and hard-fails if the corpus
+  cannot be downloaded rather than skipping.
