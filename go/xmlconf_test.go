@@ -37,8 +37,8 @@ const (
 	// `&#X..;`, and references to external or unparsed entities where
 	// §4.1 forbids them) but does not check most character-level WF
 	// constraints or DTD-declaration syntax, so the floor is well below
-	// the total and serves as a regression guard. Measured: 73.
-	notWfSaRejectFloor = 73
+	// the total and serves as a regression guard. Measured: 74.
+	notWfSaRejectFloor = 74
 )
 
 func xmlconfRoot(t *testing.T) string {

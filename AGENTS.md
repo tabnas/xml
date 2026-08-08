@@ -255,7 +255,7 @@ rebuilds from clean, `make tags-go` lists `go/v*` tags, and
 `make publish-go V=x.y.z` injects `V` into the `const Version` in
 `go/xml.go`, commits, tags `go/vX.Y.Z`, pushes, and (if `gh` is present)
 creates a GitHub release. `make publish-ts` publishes the TS package at
-its `package.json` version (currently `0.4.1`).
+its `package.json` version.
 
 ## CI
 

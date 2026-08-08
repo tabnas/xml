@@ -206,6 +206,18 @@ const Xml: Plugin = (tn: Tabnas, options: XmlOptions) => {
       comment: { lex: false },
       space:   { lex: false },
       line:    { lex: false },
+      // XML 1.0 §2.1: a well-formed document has exactly ONE document
+      // element. Input that parses to no value at all — a prolog on its own,
+      // a lone comment, whitespace — satisfies every other rule and then
+      // yields `undefined`, which the caller cannot distinguish from a
+      // successful parse of nothing. Treat it as the well-formedness error it
+      // is. Only in standalone mode: in embed mode this grammar is a fragment
+      // inside a jsonic document and has no document element of its own.
+      result: { fail: [undefined] },
+      // ...and the same rule makes empty input ill-formed. The engine
+      // short-circuits `''` before the rule loop, so result.fail never sees
+      // it; lex.empty is the switch that governs that path.
+      lex: { empty: false },
     })
   } else {
     // Embed mode: keep all of Jsonic's standard grammar. Still register

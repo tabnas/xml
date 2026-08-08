@@ -59,3 +59,15 @@ line-comment-after-root	<a/>// not xml	ERROR:text_at_top_level
 block-comment-after-root	<a/>/* not xml */	ERROR:text_at_top_level
 second-root-element	<a/><b/>	ERROR
 second-root-element-after-comment	<a/><!-- ok --><b/>	ERROR
+
+# XML 1.0 §2.1 `document ::= prolog element Misc*` requires exactly ONE
+# document element. The over-supply is covered above (second-root-element);
+# these pin the under-supply — a prolog alone, a lone comment, white space
+# or nothing at all. Standalone mode only: in embed mode this grammar is a
+# fragment inside a jsonic document and has no document element of its own.
+no-document-element-empty		ERROR
+no-document-element-space	\n\t 	ERROR
+no-document-element-prolog	<?xml version="1.0"?>	ERROR
+no-document-element-comment	<!-- only a comment -->	ERROR
+no-document-element-prolog-comment	<?xml version="1.0"?><!-- c -->	ERROR
+no-document-element-doctype	<!DOCTYPE a>	ERROR
