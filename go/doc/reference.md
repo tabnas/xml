@@ -29,7 +29,7 @@ import (
 | `tabnasxml.Defaults`        | `map[string]any`                                  | Default option values to pass to `UseDefaults`.  |
 | `tabnasxml.DecodeBOM`       | `func(string) string`                             | Strip/transcode a byte-order mark before parse.  |
 | `tabnasxml.EntityDecoder`   | `func(string, map[string]string) string`          | The entity-decoder function type (advanced).     |
-| `tabnasxml.Version`         | `string`                                          | The module version string.                       |
+| `tabnasxml.VERSION`         | `string`                                          | The module version string. Always equals `ts/package.json` "version". |
 
 ## Parse entry
 

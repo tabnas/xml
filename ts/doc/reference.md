@@ -27,6 +27,7 @@ import type { XmlOptions, XmlElement } from '@tabnas/xml'
 | `decodeBOM`  | `(src) => string`   | Strip/transcode a byte-order mark before parsing.   |
 | `XmlOptions` | type                | The options object accepted by `Xml`.               |
 | `XmlElement` | type                | The shape of a parsed element node.                  |
+| `VERSION`    | `string`            | This package's version. Always equals `package.json` "version". |
 
 `Xml.defaults` holds the default options object (see [Options](#options)).
 
