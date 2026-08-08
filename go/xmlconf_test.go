@@ -24,18 +24,21 @@ import (
 // and will move upward as conformance improves.
 
 const (
-	// Minimum `valid/sa/*.xml` documents that must parse without error
-	// (out of 120). The conformance runner pre-decodes BOMs and
-	// supports Unicode tag names, so the floor is set close to the
-	// total.
-	validSaPassFloor = 118
+	// Minimum `valid/sa/*.xml` documents that must parse without error.
+	// The conformance runner pre-decodes BOMs and supports Unicode tag
+	// names, and every one of the 120 documents parses, so the floor is
+	// the total.
+	validSaPassFloor = 120
 
-	// Minimum `not-wf/sa/*.xml` documents that must be rejected. The
-	// parser catches structural well-formedness errors (bad tags,
-	// unmatched close, unterminated constructs) but does not check
-	// many character-level WF constraints, so this floor is set well
-	// below total (186) and serves as a regression guard.
-	notWfSaRejectFloor = 30
+	// Minimum `not-wf/sa/*.xml` documents that must be rejected (out of
+	// 186). The parser catches structural well-formedness errors (bad
+	// tags, unmatched close, unterminated constructs, character data
+	// outside the root element, the uppercase-X character reference
+	// `&#X..;`, and references to external or unparsed entities where
+	// §4.1 forbids them) but does not check most character-level WF
+	// constraints or DTD-declaration syntax, so the floor is well below
+	// the total and serves as a regression guard. Measured: 73.
+	notWfSaRejectFloor = 73
 )
 
 func xmlconfRoot(t *testing.T) string {

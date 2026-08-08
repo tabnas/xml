@@ -1,4 +1,4 @@
-# name	input	expected	opts
+# name	input	expected	opts	msg
 # Inputs that must raise a parse error. `expected` uses the literal token
 # "ERROR" (optionally ":code" for a specific error code) to indicate that
 # parsing must fail.
@@ -12,5 +12,50 @@ xmlns-redeclare-xmlns	<a xmlns:xmlns="http://example.com"/>	ERROR:reserved_names
 xmlns-xml-wrong-uri	<a xmlns:xml="http://example.com"/>	ERROR:reserved_namespace
 xmlns-default-xml-uri	<a xmlns="http://www.w3.org/XML/1998/namespace"/>	ERROR:reserved_namespace
 xmlns-other-prefix-xml-uri	<a xmlns:foo="http://www.w3.org/XML/1998/namespace"/>	ERROR:reserved_namespace
-unbound-element-prefix	<a><foo:b/></a>	ERROR:unbound_prefix
-unbound-attribute-prefix	<a foo:bar="x"/>	ERROR:unbound_prefix
+# An unbound namespace prefix violates Namespaces in XML 1.0, which is a
+# SEPARATE spec from XML 1.0 well-formedness: `<foo:b/>` is a well-formed
+# XML document. The check is therefore opt-in via `strictNamespaces`; the
+# default (accepting) behaviour is pinned in namespaces.tsv.
+unbound-element-prefix-strict	<a><foo:b/></a>	ERROR:unbound_prefix	{"strictNamespaces":true}
+unbound-attribute-prefix-strict	<a foo:bar="x"/>	ERROR:unbound_prefix	{"strictNamespaces":true}
+unbound-nested-prefix-strict	<a xmlns:p="http://p.example"><p:b><q:c/></p:b></a>	ERROR:unbound_prefix	{"strictNamespaces":true}
+
+# A namespace name is a URI reference (Namespaces in XML 1.0 §2), and a URI
+# reference cannot contain white space. Attribute-value normalisation
+# (§3.3.3) turns a literal line break in the declaration into a space
+# first, so both spellings land on the same error.
+ns-uri-with-space	<a xmlns:m="http://x.example/ /y"><m:b/></a>	ERROR:invalid_namespace_uri
+ns-uri-with-newline	<a xmlns:m="http://x.example/\n/y"><m:b/></a>	ERROR:invalid_namespace_uri
+ns-uri-with-tab	<a xmlns:m="http://x.example/\t/y"/>	ERROR:invalid_namespace_uri
+default-ns-uri-with-space	<a xmlns="http://x.example/ /y"/>	ERROR:invalid_namespace_uri
+ns-uri-trailing-space	<a xmlns="http://x.example/ "/>	ERROR:invalid_namespace_uri
+
+# Error templates must interpolate. The `msg` column pins the rendered
+# text, so a template that reverts to a literal `$fsrc` / `$openname`
+# placeholder fails here instead of shipping.
+mismatched-close-message	<a></b>	ERROR:xml_mismatched_tag		closing tag </b> does not match opening tag <a>
+mismatched-close-nested-message	<a><b></c></b></a>	ERROR:xml_mismatched_tag		closing tag </c> does not match opening tag <b>
+mismatched-close-hint-message	<a></b>	ERROR:xml_mismatched_tag		Expected </a> but found </b>.
+invalid-tag-message	<a b>	ERROR:xml_invalid_tag		invalid tag: <a b>
+unterminated-comment-message	<a><!-- x	ERROR:unterminated_comment		unterminated comment: <!-- x
+unterminated-cdata-message	<a><![CDATA[x	ERROR:unterminated_cdata		unterminated CDATA section: <![CDATA[x
+unterminated-pi-message	<a><?t x	ERROR:unterminated_pi		unterminated processing instruction: <?t x
+unterminated-doctype-message	<!DOCTYPE a [<!ENTITY x "y">	ERROR:unterminated_doctype		unterminated DOCTYPE declaration: <!DOCTYPE a
+no-placeholder-leak-mismatched	<a></b>	ERROR:xml_mismatched_tag		does not match opening tag <a>
+text-after-root	<a/>junk	ERROR:text_at_top_level
+text-before-root	junk<a/>	ERROR:text_at_top_level
+text-between-roots	<a/>junk<b/>	ERROR:text_at_top_level
+text-after-root-with-comment	<a/><!-- ok -->junk	ERROR:text_at_top_level
+
+# The relaxed-JSON engine's own comment syntaxes are not XML markup: at
+# document level they are character data outside the root element, and
+# XML 1.0 §2.1 [1] `document ::= prolog element Misc*` admits only
+# comments, PIs and white space there.
+hash-comment-in-prolog	# not xml\n<a/>	ERROR:text_at_top_level
+line-comment-in-prolog	// not xml\n<a/>	ERROR:text_at_top_level
+block-comment-in-prolog	/* not xml */<a/>	ERROR:text_at_top_level
+hash-comment-after-root	<a/># not xml	ERROR:text_at_top_level
+line-comment-after-root	<a/>// not xml	ERROR:text_at_top_level
+block-comment-after-root	<a/>/* not xml */	ERROR:text_at_top_level
+second-root-element	<a/><b/>	ERROR
+second-root-element-after-comment	<a/><!-- ok --><b/>	ERROR

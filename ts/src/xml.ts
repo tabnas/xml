@@ -57,6 +57,17 @@ type XmlOptions = {
   // to unknown names are left as-is in the output (legacy behaviour
   // useful for templating).
   strictEntities: boolean
+  // Whether to enforce the Namespaces in XML 1.0 constraint that every
+  // prefix used on an element or attribute name be bound by an
+  // in-scope `xmlns:prefix` declaration. Default: false.
+  //
+  // XML 1.0 well-formedness and Namespaces in XML are separate specs:
+  // `<a><foo:b/></a>` is a well-formed XML document (`foo:b` is a legal
+  // Name), it is merely not *namespace*-well-formed. The parser's job
+  // is XML 1.0, so an unbound prefix is reported only when this option
+  // is turned on. Either way the element keeps its `prefix` and
+  // `localName`; an unbound prefix simply leaves `namespace` unset.
+  strictNamespaces: boolean
   // Embed mode. When `false` (default), the plugin configures the parser
   // for pure-XML input: the start rule becomes `xml`, JSON structural
   // tokens are disabled, and all non-XML lexing is turned off.
@@ -86,12 +97,12 @@ const grammarText = `
 {
   rule: xml: open: [
     { s: '#ZZ' }
-    { s: '#TX' r: xml }
+    { s: '#TX' r: xml a: '@doc-text-open' }
     { p: element c: '@no-root-yet' }
   ]
   rule: xml: close: [
     { s: '#ZZ' }
-    { s: '#TX' r: xml }
+    { s: '#TX' r: xml a: '@doc-text-close' }
   ]
 
   rule: element: open: [
@@ -124,6 +135,9 @@ const grammarText = `
 
 const Xml: Plugin = (tn: Tabnas, options: XmlOptions) => {
   const embed = options.embed === true
+  // Namespace-constraint checking (unbound prefixes) is opt-in — XML
+  // 1.0 well-formedness does not require prefixes to be bound.
+  const strictNamespaces = options.strictNamespaces === true
   const decodeEntity = buildEntityDecoder(options)
 
   // Human descriptions for the XML tokens, surfaced in railroad diagram
@@ -206,10 +220,17 @@ const Xml: Plugin = (tn: Tabnas, options: XmlOptions) => {
   // Error templates and hints are installed in both modes.
   tn.options({
     error: {
+      // Error templates interpolate `{key}` against the failing
+      // token's `use` details (plus the token/rule/context fields);
+      // `$name` is not a placeholder syntax the engine understands, so
+      // never use it here — it would be emitted verbatim.
       xml_mismatched_tag:
-        'closing tag </$fsrc> does not match opening tag <$openname>',
-      xml_invalid_tag: 'invalid tag: $fsrc',
-      xml_unterminated: 'unterminated $kind',
+        'closing tag </{closename}> does not match opening tag <{openname}>',
+      xml_invalid_tag: 'invalid tag: {src}',
+      unterminated_comment: 'unterminated comment: {src}',
+      unterminated_cdata: 'unterminated CDATA section: {src}',
+      unterminated_pi: 'unterminated processing instruction: {src}',
+      unterminated_doctype: 'unterminated DOCTYPE declaration: {src}',
       comment_double_dash: 'comment body cannot contain "--"',
       cdata_terminator_in_text: 'character data cannot contain "]]>"',
       pi_target_invalid: 'processing instruction target is missing or invalid',
@@ -219,13 +240,21 @@ const Xml: Plugin = (tn: Tabnas, options: XmlOptions) => {
       invalid_xml_char: 'illegal control character in XML data',
       reserved_namespace: 'invalid use of a reserved namespace prefix or URI',
       unbound_prefix: 'element or attribute uses an undeclared namespace prefix',
+      invalid_namespace_uri: 'namespace name cannot contain white space',
       undeclared_entity: 'reference to undeclared entity',
+      unparsed_entity_ref: 'reference to an unparsed (NDATA) entity',
+      external_entity_in_attr:
+        'attribute value cannot reference an external entity',
+      text_at_top_level: 'character data is not allowed outside the root element',
     },
     hint: {
       xml_mismatched_tag: `Each opening tag must be paired with a matching closing tag.
-Expected </$openname> but found </$fsrc>.`,
+Expected </{openname}> but found </{closename}>.`,
       xml_invalid_tag: `The tag syntax is not valid XML.`,
-      xml_unterminated: `The $kind starting at this position is not terminated.`,
+      unterminated_comment: `The comment starting at this position has no closing "-->".`,
+      unterminated_cdata: `The CDATA section starting at this position has no closing "]]>".`,
+      unterminated_pi: `The processing instruction starting at this position has no closing "?>".`,
+      unterminated_doctype: `The DOCTYPE declaration starting at this position has no closing ">".`,
       comment_double_dash: `XML 1.0 disallows "--" inside a comment body.`,
       cdata_terminator_in_text: `The literal "]]>" must only appear as the end of a CDATA section.`,
       pi_target_invalid: `A processing instruction must start with a Name; the XML declaration <?xml...?> is the special case.`,
@@ -235,7 +264,11 @@ Expected </$openname> but found </$fsrc>.`,
       invalid_xml_char: `Only #x9, #xA, #xD and code points >= #x20 are legal XML characters.`,
       reserved_namespace: `The "xml" prefix is fixed to ${XML_NS_URI}; the "xmlns" prefix cannot be redeclared, and neither URI may be bound to any other prefix or as the default namespace.`,
       unbound_prefix: `Declare the prefix with xmlns:prefix="..." on this element or one of its ancestors.`,
+      invalid_namespace_uri: `A namespace name is a URI reference, and a URI reference cannot contain white space; note that a line break inside the declaration becomes a space under attribute-value normalisation.`,
       undeclared_entity: `Declare the entity in the DOCTYPE internal subset, add it to the customEntities option, or set strictEntities: false to allow unresolved references through.`,
+      unparsed_entity_ref: `XML 1.0 §4.1 (WFC: Parsed Entity) — an entity declared with an NDATA notation is unparsed, and its name may only appear as the value of an ENTITY-typed attribute, never in an entity reference.`,
+      external_entity_in_attr: `XML 1.0 §4.1 (WFC: No External Entity References) — an attribute value may not reference an entity whose replacement text lives in an external file.`,
+      text_at_top_level: `An XML document is "prolog element Misc*": outside the single root element only comments, processing instructions and white space may appear.`,
     },
   })
 
@@ -249,7 +282,7 @@ Expected </$openname> but found </$fsrc>.`,
         // push a second root element.
         ctx.u.rootSeen = true
         if (options.namespaces !== false) {
-          const nsErr = resolveNamespaces(root.node, {})
+          const nsErr = resolveNamespaces(root.node, {}, strictNamespaces)
           if (nsErr) {
             return ctx.t0.bad(nsErr)
           }
@@ -260,6 +293,12 @@ Expected </$openname> but found </$fsrc>.`,
     // Condition: only allow the xml rule to push an `element` if the
     // document hasn't already produced a root (XML 1.0 §2.1).
     '@no-root-yet': (_r: Rule, ctx: Context) => true !== ctx.u.rootSeen,
+
+    // XML 1.0 §2.1 [1] document ::= prolog element Misc* — outside the
+    // root element only Misc (comments, PIs, whitespace) may appear, so
+    // character data before or after the root is not well-formed.
+    '@doc-text-open': (r: Rule, ctx: Context) => checkDocText(r.o0, ctx),
+    '@doc-text-close': (r: Rule, ctx: Context) => checkDocText(r.c0, ctx),
 
     '@element-open': (r: Rule, ctx: Context) => {
       const v = r.o0.val
@@ -281,12 +320,19 @@ Expected </$openname> but found </$fsrc>.`,
       }
     },
 
-    '@element-close': (r: Rule, ctx: Context) => {
+    '@element-close': (r: Rule, _ctx: Context) => {
       const openName = r.node && r.node.name
       const closeName = r.c0.val
       if (openName !== closeName) {
-        r.c0.use = { openname: openName }
-        return ctx.t0.bad('xml_mismatched_tag')
+        // Mark the offending close tag itself (not the lookahead
+        // token) so the caret lands on `</b>`, and attach the two
+        // names as `use` details — `RuleSpec.bad` spreads the bad
+        // token's `use` into the error details, which is where the
+        // `{openname}` / `{closename}` placeholders resolve from.
+        return r.c0.bad('xml_mismatched_tag', {
+          openname: openName,
+          closename: closeName,
+        })
       }
     },
 
@@ -337,7 +383,7 @@ Expected </$openname> but found </$fsrc>.`,
         rs.bc((r: Rule) => {
           if (r.node && 'object' === typeof r.node && r.parent &&
               r.parent.name === 'val') {
-            resolveNamespaces(r.node, {})
+            resolveNamespaces(r.node, {}, strictNamespaces)
           }
         })
       })
@@ -461,7 +507,17 @@ function decodeUTF16(b: Uint8Array, start: number, big: boolean): string {
     const a = b[i], c = b[i + 1]
     units.push(big ? (a << 8) | c : (c << 8) | a)
   }
-  return String.fromCharCode(...units)
+  // Build in chunks: `String.fromCharCode(...units)` overflows the call
+  // stack once a document has more than a few tens of thousands of code
+  // units (RangeError), which would turn a large UTF-16 document into a
+  // crash rather than a parse.
+  const CHUNK = 4096
+  if (units.length <= CHUNK) return String.fromCharCode(...units)
+  let out = ''
+  for (let i = 0; i < units.length; i += CHUNK) {
+    out += String.fromCharCode(...units.slice(i, i + CHUNK))
+  }
+  return out
 }
 
 function decodeUTF32(b: Uint8Array, start: number, big: boolean): string {
@@ -510,8 +566,11 @@ function buildEntityDecoder(options: XmlOptions) {
     if (src.indexOf('&') < 0) return src
     return src.replace(entityRE, (match, ref) => {
       if (ref[0] === '#') {
+        // Lowercase `x` only, per XML 1.0 [66]; `&#X26;` never
+        // reaches here because `entityRE` does not match it (and
+        // `checkEntityRefs` rejects it as not well-formed).
         const code =
-          ref[1] === 'x' || ref[1] === 'X'
+          ref[1] === 'x'
             ? parseInt(ref.substring(2), 16)
             : parseInt(ref.substring(1), 10)
         if (isNaN(code)) return match
@@ -664,6 +723,25 @@ function applyAttrDefaults(
   return out
 }
 
+// checkDocText enforces XML 1.0 §2.1 [1]
+// `document ::= prolog element Misc*`: at document level (before the
+// prolog's root element, and after it) only Misc — comments, PIs, and
+// white space — is allowed. Anything else is character data outside the
+// root element and is not well-formed.
+//
+// Comments/PIs/DOCTYPE arrive as #XIG and are ignored by the token set,
+// so the only document-level token to police is #TX.
+function checkDocText(tkn: any, ctx: Context): any {
+  const val = tkn && tkn.val
+  if ('string' !== typeof val) return
+  for (let i = 0; i < val.length; i++) {
+    const ch = val[i]
+    if (' ' !== ch && '\t' !== ch && '\n' !== ch && '\r' !== ch) {
+      return tkn.bad ? tkn.bad('text_at_top_level') : ctx.t0.bad('text_at_top_level')
+    }
+  }
+}
+
 // readNameInBody is a free-function counterpart to the matcher's
 // `readName` closure used by the DTD parsers, which run before the
 // matcher closure has been instantiated.
@@ -681,18 +759,35 @@ function readNameInBody(s: string, start: number): { name: string; end: number }
 }
 
 // Parse the body of a DOCTYPE declaration (the text between the `[`
-// and `]` of the internal subset) and extract every internal general
-// entity declaration `<!ENTITY name "value">`. Parameter entity
-// declarations (`<!ENTITY % name ...>`) and external entity
-// declarations (`<!ENTITY name SYSTEM "...">` etc.) are recognised
-// but skipped. Other declarations (`<!ELEMENT`, `<!ATTLIST`,
-// `<!NOTATION`) are also skipped.
+// and `]` of the internal subset) and extract every general entity
+// declaration. Parameter entity declarations (`<!ENTITY % name ...>`)
+// and other declarations (`<!ELEMENT`, `<!ATTLIST`, `<!NOTATION`) are
+// recognised but skipped.
 //
-// Returned values are stored verbatim — character and entity
-// references inside an entity value are expanded only when the
-// outer entity is referenced.
-function parseDoctypeEntities(body: string): Record<string, string> {
-  const ents: Record<string, string> = {}
+// Two maps come back:
+//   internal - `<!ENTITY name "value">`; values are stored verbatim,
+//              character and entity references inside an entity value
+//              are expanded only when the outer entity is referenced.
+//   external - `<!ENTITY name SYSTEM "...">` / `PUBLIC ...`. These
+//              entities ARE declared, so a reference to one satisfies
+//              the §4.1 "Entity Declared" well-formedness constraint,
+//              but we never fetch the replacement text, so the
+//              reference is left unexpanded in the output (§4.4.3,
+//              "not included": a non-validating processor may skip an
+//              external entity).
+//   unparsed - external entities carrying an `NDATA` notation. §4.1
+//              WFC "Parsed Entity" forbids referencing these at all;
+//              they may only appear as ENTITY-typed attribute values.
+function parseDoctypeEntities(
+  body: string,
+): {
+  internal: Record<string, string>
+  external: Record<string, string>
+  unparsed: Record<string, string>
+} {
+  const internal: Record<string, string> = {}
+  const external: Record<string, string> = {}
+  const unparsed: Record<string, string> = {}
   const isSpace = (ch: string) =>
     ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r'
   const isNm = (ch: string) => isNameCharCP(ch.charCodeAt(0))
@@ -726,15 +821,66 @@ function parseDoctypeEntities(body: string): Record<string, string> {
       const valStart = j
       while (j < body.length && body[j] !== quote) j++
       if (j >= body.length) break
-      ents[name] = body.substring(valStart, j)
-      j++
+      internal[name] = body.substring(valStart, j)
+      const end = body.indexOf('>', j)
+      i = end < 0 ? body.length : end + 1
+      continue
     }
-    // External entity (SYSTEM / PUBLIC) - skip; we don't fetch.
     const end = body.indexOf('>', j)
+    const tail = body.substring(j, end < 0 ? body.length : end)
+    if (tail.startsWith('SYSTEM') || tail.startsWith('PUBLIC')) {
+      // External entity: declared, but never fetched. An `NDATA`
+      // notation makes it an *unparsed* entity, which may not be
+      // referenced at all.
+      if (/(^|[\s"'])NDATA([\s"']|$)/.test(tail)) {
+        unparsed[name] = ''
+      } else {
+        external[name] = ''
+      }
+    }
     i = end < 0 ? body.length : end + 1
   }
-  return ents
+  return { internal, external, unparsed }
 }
+
+// Collect what the current parse knows about entity declarations, for
+// the §4.1 "Entity Declared" well-formedness check. `unread` is true
+// only when part of the DTD went unread AND the document did not
+// declare `standalone="yes"` — with `standalone="yes"` the document
+// asserts that nothing outside the internal subset matters, so the
+// constraint applies again.
+function entityDeclState(ctx: any): EntityDeclState {
+  const u = ctx?.u
+  if (null == u) return {}
+  return {
+    external: u.dtdExternalEntities,
+    unparsed: u.dtdUnparsedEntities,
+    unread: true === u.dtdUnread && true !== u.xmlStandalone,
+  }
+}
+
+type EntityDeclState = {
+  external?: Record<string, string>
+  unparsed?: Record<string, string>
+  unread?: boolean
+}
+
+// Does the internal subset contain a parameter-entity reference?
+// XML 1.0 §4.1 (WFC: Entity Declared) treats declarations inside a
+// parameter entity exactly like declarations in an unread external
+// subset: a non-validating processor need not process them, so an
+// otherwise-undeclared entity is not a well-formedness error.
+const peRefRE = /%[A-Za-z_:][A-Za-z0-9_\-\.:]*;/
+
+// Does the DOCTYPE head (everything between `<!DOCTYPE` and the
+// internal subset / closing `>`) carry an ExternalID? XML 1.0 §2.8
+// [75]: `ExternalID ::= 'SYSTEM' S SystemLiteral | 'PUBLIC' S
+// PubidLiteral S SystemLiteral`.
+const externalIDRE = /(^|[\s>])(SYSTEM|PUBLIC)([\s"'])/
+
+// XML declaration standalone document declaration (§2.9 [32]):
+// `S 'standalone' Eq ("'" ("yes" | "no") "'" | '"' ("yes" | "no") '"')`.
+const standaloneYesRE = /\bstandalone\s*=\s*(['"])yes\1/
 
 
 // Build a lexer matcher that recognises all top-level XML constructs
@@ -798,13 +944,14 @@ function buildXmlTagMatcher(
   function processText(
     raw: string,
     dtd: Record<string, string>,
+    entdecl: { external?: Record<string, string>; unread?: boolean },
   ): { val?: string; err?: string } {
     const ctrlErr = checkChars(raw)
     if (ctrlErr) return { err: ctrlErr }
     if (raw.indexOf(']]>') >= 0) {
       return { err: 'cdata_terminator_in_text' }
     }
-    const ampErr = checkEntityRefs(raw, dtd, declared, strict)
+    const ampErr = checkEntityRefs(raw, dtd, declared, strict, entdecl)
     if (ampErr) return { err: ampErr }
     // §2.11: normalise CR LF and lone CR to LF before downstream processing.
     const normalised = normaliseLineEndings(raw)
@@ -816,23 +963,32 @@ function buildXmlTagMatcher(
   return function makeXmlTagMatcher(_cfg: Config, _opts: TabnasOptions) {
     return function xmlTagMatcher(lex: Lex) {
       const { pnt, src } = lex
-      const sI = pnt.sI
+      let sI = pnt.sI
 
       // Strip a UTF-8 byte-order mark at the very start of input.
       // After decoding, a UTF-8 BOM appears as a single U+FEFF
       // character; some toolchains pass through the raw bytes
-      // (EF BB BF) as three separate Latin-1 code units.
-      if (sI === 0 && src.length > 0) {
-        if (src.charCodeAt(0) === 0xfeff) {
-          pnt.sI = 1
-          return undefined
+      // (EF BB BF) as three separate Latin-1 code units. The BOM is
+      // not part of the document, so skip it and carry on matching in
+      // this same call — returning `undefined` here would hand control
+      // back to a lexer that has no other matcher enabled in pure
+      // mode, and the following `<?xml` would be reported as an
+      // unexpected character.
+      if (0 === sI && 0 < src.length) {
+        let bomLen = 0
+        if (0xfeff === src.charCodeAt(0)) {
+          bomLen = 1
+        } else if (3 <= src.length &&
+          0xef === src.charCodeAt(0) &&
+          0xbb === src.charCodeAt(1) &&
+          0xbf === src.charCodeAt(2)) {
+          bomLen = 3
         }
-        if (src.length >= 3 &&
-            src.charCodeAt(0) === 0xef &&
-            src.charCodeAt(1) === 0xbb &&
-            src.charCodeAt(2) === 0xbf) {
-          pnt.sI = 3
-          return undefined
+        if (0 < bomLen) {
+          // The BOM occupies no display column, so only the source
+          // index advances; token positions stay aligned with the
+          // document text proper.
+          pnt.sI = sI = bomLen
         }
       }
 
@@ -849,7 +1005,7 @@ function buildXmlTagMatcher(
           if (i === sI) return undefined
           const raw = src.substring(sI, i)
           const dtd = (lex.ctx?.u?.dtdEntities) || {}
-          const result = processText(raw, dtd)
+          const result = processText(raw, dtd, entityDeclState(lex.ctx))
           if (result.err) {
             return lex.bad(result.err, sI, i)
           }
@@ -909,6 +1065,21 @@ function buildXmlTagMatcher(
         let subsetEnd = -1
         while (i < src.length) {
           const ch = src[i]
+          // Skip over comments and processing instructions first: their
+          // bodies are opaque text, so an apostrophe (`doesn't`) or a
+          // `>` inside one must not be read as markup.
+          if (src.startsWith('<!--', i)) {
+            const ce = src.indexOf('-->', i + 4)
+            if (ce === -1) { i = src.length; break }
+            i = ce + 3
+            continue
+          }
+          if (src.startsWith('<?', i)) {
+            const pe = src.indexOf('?>', i + 2)
+            if (pe === -1) { i = src.length; break }
+            i = pe + 2
+            continue
+          }
           // Skip over quoted strings so `]` and `>` inside an
           // entity value or attribute default cannot terminate the
           // subset prematurely.
@@ -931,23 +1102,58 @@ function buildXmlTagMatcher(
           return lex.bad('unterminated_doctype', sI, src.length)
         }
         const end = i + 1
-        // Extract internal-subset declarations and stash them on
-        // the per-parse context. The matcher's text/attribute paths
-        // and the element actions read these back via lex.ctx.u.
-        if (subsetStart >= 0 && subsetEnd > subsetStart && lex.ctx) {
+        if (lex.ctx) {
           const u: any = lex.ctx.u || (lex.ctx.u = {})
-          const subset = src.substring(subsetStart, subsetEnd)
-          const ents = parseDoctypeEntities(subset)
-          if (Object.keys(ents).length > 0) {
-            u.dtdEntities = { ...(u.dtdEntities || {}), ...ents }
+
+          // XML 1.0 §4.1, WFC "Entity Declared": the constraint that a
+          // referenced entity be declared applies only when the
+          // processor has seen every declaration. If the DOCTYPE names
+          // an external subset — which we never fetch — then (unless
+          // the document declares `standalone="yes"`) an undeclared
+          // entity is NOT a well-formedness error. The head of the
+          // DOCTYPE is everything up to the internal subset's `[`, or
+          // up to the closing `>` when there is no internal subset.
+          const headEnd = 0 <= subsetStart ? subsetStart - 1 : i
+          if (externalIDRE.test(src.substring(sI + 9, headEnd))) {
+            u.dtdUnread = true
           }
-          const atts = parseDoctypeAttlists(subset)
-          if (Object.keys(atts).length > 0) {
-            const merged = { ...(u.dtdAttrDefaults || {}) }
-            for (const elem of Object.keys(atts)) {
-              merged[elem] = { ...(merged[elem] || {}), ...atts[elem] }
+
+          // Extract internal-subset declarations and stash them on
+          // the per-parse context. The matcher's text/attribute paths
+          // and the element actions read these back via lex.ctx.u.
+          if (subsetStart >= 0 && subsetEnd > subsetStart) {
+            const subset = src.substring(subsetStart, subsetEnd)
+
+            // A parameter-entity reference in the internal subset hides
+            // declarations from a non-validating processor just as an
+            // external subset does.
+            if (peRefRE.test(subset)) {
+              u.dtdUnread = true
             }
-            u.dtdAttrDefaults = merged
+
+            const ents = parseDoctypeEntities(subset)
+            if (Object.keys(ents.internal).length > 0) {
+              u.dtdEntities = { ...(u.dtdEntities || {}), ...ents.internal }
+            }
+            // Externally-declared general entities are declared (so a
+            // reference to one is well-formed) but unresolvable, so
+            // they are tracked apart from the expandable ones.
+            if (Object.keys(ents.external).length > 0) {
+              u.dtdExternalEntities =
+                { ...(u.dtdExternalEntities || {}), ...ents.external }
+            }
+            if (Object.keys(ents.unparsed).length > 0) {
+              u.dtdUnparsedEntities =
+                { ...(u.dtdUnparsedEntities || {}), ...ents.unparsed }
+            }
+            const atts = parseDoctypeAttlists(subset)
+            if (Object.keys(atts).length > 0) {
+              const merged = { ...(u.dtdAttrDefaults || {}) }
+              for (const elem of Object.keys(atts)) {
+                merged[elem] = { ...(merged[elem] || {}), ...atts[elem] }
+              }
+              u.dtdAttrDefaults = merged
+            }
           }
         }
         const tkn = lex.token('#XIG', src.substring(sI, end), src.substring(sI, end), pnt)
@@ -974,6 +1180,16 @@ function buildXmlTagMatcher(
         }
         if (checkChars(src.substring(sI + 2, endIdx))) {
           return lex.bad('invalid_xml_char', sI, endIdx + 2)
+        }
+        // The XML declaration's standalone document declaration
+        // (§2.9) decides whether the §4.1 "Entity Declared" constraint
+        // still applies when part of the DTD went unread — with
+        // `standalone="yes"` the document promises there is nothing
+        // relevant out there, so an undeclared entity is an error again.
+        if ('xml' === piTargetRes.name && lex.ctx &&
+          standaloneYesRE.test(src.substring(i, endIdx))) {
+          const u: any = lex.ctx.u || (lex.ctx.u = {})
+          u.xmlStandalone = true
         }
         const end = endIdx + 2
         const tkn = lex.token('#XIG', src.substring(sI, end), src.substring(sI, end), pnt)
@@ -1084,7 +1300,8 @@ function buildXmlTagMatcher(
           return lex.bad(charErr, valStart, i)
         }
         const dtd = (lex.ctx?.u?.dtdEntities) || {}
-        const ampErr = checkEntityRefs(rawVal, dtd, declared, strict)
+        const ampErr = checkEntityRefs(
+          rawVal, dtd, declared, strict, entityDeclState(lex.ctx), true)
         if (ampErr) {
           return lex.bad(ampErr, valStart, i)
         }
@@ -1179,15 +1396,35 @@ function checkChars(s: string): string {
 // unknown names trigger `bad_entity_ref`; when false (legacy mode),
 // the syntactic check still runs but unknown names pass through.
 //
+// `entdecl` describes what the processor knows about the DTD:
+//   external - general entities declared by an `<!ENTITY name SYSTEM
+//              ...>` in the internal subset. Declared, so referencing
+//              one is well-formed, but never fetched.
+//   unparsed - external entities with an `NDATA` notation. §4.1 WFC
+//              "Parsed Entity": these must never be referenced.
+//   unread   - true when part of the DTD went unread (an external
+//              subset, or declarations behind a parameter-entity
+//              reference) and the document is not `standalone="yes"`.
+//              XML 1.0 §4.1 WFC "Entity Declared" then does not apply,
+//              so an unknown entity name must be let through even in
+//              strict mode.
+//
+// `inAttr` marks a scan of an attribute value, where §4.1 WFC "No
+// External Entity References" additionally forbids referencing any
+// external entity.
+//
 // Well-formed forms:
 //   &name;       — name must start with a NameStartChar
 //   &#nnnn;      — decimal numeric character reference
-//   &#xhhhh;     — hexadecimal numeric character reference
+//   &#xhhhh;     — hexadecimal numeric character reference (lowercase
+//                  `x` only, per [66])
 function checkEntityRefs(
   s: string,
   dtd?: Record<string, string>,
   extra?: Record<string, string>,
   strict?: boolean,
+  entdecl?: EntityDeclState,
+  inAttr?: boolean,
 ): string {
   for (let i = 0; i < s.length; i++) {
     if (s[i] !== '&') continue
@@ -1197,11 +1434,15 @@ function checkEntityRefs(
     if (ref.length === 0) return 'bad_entity_ref'
     if (ref[0] === '#') {
       if (ref.length < 2) return 'bad_entity_ref'
-      const digits = ref[1] === 'x' || ref[1] === 'X'
-        ? ref.substring(2)
-        : ref.substring(1)
+      // XML 1.0 §4.1 [66]:
+      //   CharRef ::= '&#' [0-9]+ ';' | '&#x' [0-9a-fA-F]+ ';'
+      // The `x` marker is lowercase-only — `&#X26;` is NOT a character
+      // reference, and since `X26` is not a Name it is not an entity
+      // reference either, so it is not well-formed.
+      const hex = 'x' === ref[1]
+      const digits = hex ? ref.substring(2) : ref.substring(1)
       if (digits.length === 0) return 'bad_entity_ref'
-      const valid = ref[1] === 'x' || ref[1] === 'X'
+      const valid = hex
         ? /^[0-9a-fA-F]+$/.test(digits)
         : /^[0-9]+$/.test(digits)
       if (!valid) return 'bad_entity_ref'
@@ -1218,10 +1459,24 @@ function checkEntityRefs(
         if (!isNameCharCP(cp)) return 'bad_entity_ref'
         j += cp > 0xffff ? 2 : 1
       }
-      // §4.1: in strict mode the named entity must resolve.
-      if (strict &&
-          !(extra && Object.prototype.hasOwnProperty.call(extra, ref)) &&
-          !(dtd && Object.prototype.hasOwnProperty.call(dtd, ref))) {
+      const has = (m: Record<string, string> | undefined) =>
+        !!m && Object.prototype.hasOwnProperty.call(m, ref)
+
+      // §4.1 WFC "Parsed Entity": an entity reference must not name an
+      // unparsed (NDATA) entity, anywhere.
+      if (has(entdecl?.unparsed)) return 'unparsed_entity_ref'
+
+      if (has(entdecl?.external)) {
+        // Declared externally: the "Entity Declared" WFC is satisfied
+        // and the replacement text is simply not included. But §4.1
+        // WFC "No External Entity References" forbids the reference in
+        // an attribute value.
+        if (inAttr) return 'external_entity_in_attr'
+      } else if (strict &&
+        true !== entdecl?.unread &&
+        !has(extra) && !has(dtd)) {
+        // §4.1 WFC "Entity Declared" — suspended when the processor
+        // never got to see the whole DTD (see `entdecl.unread`).
         return 'undeclared_entity'
       }
     }
@@ -1255,7 +1510,9 @@ const XML_NS_URI = 'http://www.w3.org/XML/1998/namespace'
 const XMLNS_NS_URI = 'http://www.w3.org/2000/xmlns/'
 
 function resolveNamespaces(
-  element: XmlElement, scope: Record<string, string>,
+  element: XmlElement,
+  scope: Record<string, string>,
+  strict?: boolean,
 ): string {
   // Pre-bind the xml prefix to its reserved URI so xml:lang / xml:space
   // qualify correctly without an explicit declaration.
@@ -1263,23 +1520,49 @@ function resolveNamespaces(
     ns: { ...scope, xml: XML_NS_URI },
     space: 'default',
     lang: '',
-  })
+  }, true === strict)
+}
+
+// A namespace name is a URI reference (Namespaces in XML 1.0 §2, RFC
+// 3986). White space is not permitted in a URI reference, and
+// attribute-value normalisation (§3.3.3) has already turned any
+// literal TAB/LF/CR in the declaration into a space by the time we see
+// it, so a space here means the source held white space inside the
+// namespace name.
+function invalidNamespaceURI(uri: string): boolean {
+  for (let i = 0; i < uri.length; i++) {
+    const ch = uri[i]
+    if (' ' === ch || '\t' === ch || '\n' === ch || '\r' === ch) return true
+  }
+  return false
 }
 
 // Returns '' on success or an XML namespace error code on the first
 // violation (reserved-prefix misuse, unbound prefix). On error the
 // tree may be partly annotated; callers should treat that as undefined.
-function resolveScope(element: XmlElement, scope: XmlScope): string {
+function resolveScope(
+  element: XmlElement, scope: XmlScope, strict: boolean,
+): string {
   const ns = { ...scope.ns }
   let space = scope.space
   let lang = scope.lang
 
-  for (const key of Object.keys(element.attributes || {})) {
+  const attrKeys = Object.keys(element.attributes || {})
+
+  // Pass 1: every namespace declaration on this element, plus xml:space
+  // / xml:lang. Namespaces in XML 1.0 §5.2 scopes a declaration over the
+  // whole element it appears on, *including that element's own other
+  // attributes* — so all declarations must be in hand before any
+  // prefixed name is resolved. Resolving in a single pass made binding
+  // depend on attribute order, wrongly rejecting
+  // `<a p:x="1" xmlns:p="..."/>`.
+  for (const key of attrKeys) {
     const val = element.attributes[key]
     if (key === 'xmlns') {
       if (val === XML_NS_URI || val === XMLNS_NS_URI) {
         return 'reserved_namespace'
       }
+      if (invalidNamespaceURI(val)) return 'invalid_namespace_uri'
       ns[''] = val
     } else if (key.startsWith('xmlns:')) {
       const prefix = key.substring(6)
@@ -1290,19 +1573,27 @@ function resolveScope(element: XmlElement, scope: XmlScope): string {
       } else if (val === XML_NS_URI || val === XMLNS_NS_URI) {
         return 'reserved_namespace'
       }
+      if (invalidNamespaceURI(val)) return 'invalid_namespace_uri'
       ns[prefix] = val
     } else if (key === 'xml:space') {
       space = val
     } else if (key === 'xml:lang') {
       lang = val
-    } else {
-      // Attribute name namespace check.
+    }
+  }
+
+  // Pass 2: resolve prefixed attribute names against the completed
+  // in-scope declarations.
+  if (strict) {
+    for (const key of attrKeys) {
+      if (key === 'xmlns' || key.startsWith('xmlns:')) continue
       const colon = key.indexOf(':')
       if (colon > 0) {
         const ap = key.substring(0, colon)
-        if (ap === 'xmlns') {
-          // already handled above
-        } else if (!Object.prototype.hasOwnProperty.call(ns, ap)) {
+        // Namespace-constraint only (see XmlOptions.strictNamespaces):
+        // an unbound prefix on an attribute name leaves the attribute
+        // unqualified but keeps the document XML 1.0 well-formed.
+        if (!Object.prototype.hasOwnProperty.call(ns, ap)) {
           return 'unbound_prefix'
         }
       }
@@ -1316,9 +1607,12 @@ function resolveScope(element: XmlElement, scope: XmlScope): string {
     element.localName = element.name.substring(colonIdx + 1)
     if (Object.prototype.hasOwnProperty.call(ns, prefix)) {
       element.namespace = ns[prefix]
-    } else {
+    } else if (strict) {
       return 'unbound_prefix'
     }
+    // Not strict: leave `namespace` unset — the element is named but
+    // unqualified, which is what a namespace-unaware (yet XML 1.0
+    // conformant) consumer sees.
   } else {
     element.localName = element.name
     if (ns['']) {
@@ -1332,7 +1626,7 @@ function resolveScope(element: XmlElement, scope: XmlScope): string {
   const childScope: XmlScope = { ns, space, lang }
   for (const child of element.children) {
     if (child && 'object' === typeof child) {
-      const err = resolveScope(child, childScope)
+      const err = resolveScope(child, childScope, strict)
       if (err) return err
     }
   }
@@ -1345,6 +1639,7 @@ Xml.defaults = {
   entities: true,
   customEntities: {},
   strictEntities: true,
+  strictNamespaces: false,
   embed: false,
 } as XmlOptions
 

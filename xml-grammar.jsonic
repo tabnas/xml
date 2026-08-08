@@ -13,12 +13,12 @@
 {
   rule: xml: open: [
     { s: '#ZZ' }
-    { s: '#TX' r: xml }
+    { s: '#TX' r: xml a: '@doc-text-open' }
     { p: element c: '@no-root-yet' }
   ]
   rule: xml: close: [
     { s: '#ZZ' }
-    { s: '#TX' r: xml }
+    { s: '#TX' r: xml a: '@doc-text-close' }
   ]
 
   rule: element: open: [
