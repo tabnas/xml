@@ -26,7 +26,7 @@ import (
 	jsonic "github.com/tabnas/jsonic/go"
 )
 
-const Version = "0.5.0"
+const Version = "0.6.0"
 
 // Defaults are merged with caller-supplied options when the plugin is
 // registered via jsonic.UseDefaults.
