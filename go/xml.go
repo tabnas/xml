@@ -26,7 +26,10 @@ import (
 	jsonic "github.com/tabnas/jsonic/go"
 )
 
-const Version = "0.6.0"
+// VERSION is this module's version. It MUST equal ts/package.json
+// "version": the release orchestrator rewrites both, and
+// TestVersionMatchesPackageJSON fails the build if they drift.
+const VERSION = "0.6.0"
 
 // Defaults are merged with caller-supplied options when the plugin is
 // registered via jsonic.UseDefaults.
