@@ -199,6 +199,19 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 			Comment: &jsonic.CommentOptions{Lex: boolPtr(false)},
 			Space:   &jsonic.SpaceOptions{Lex: boolPtr(false)},
 			Line:    &jsonic.LineOptions{Lex: boolPtr(false)},
+			// XML 1.0 §2.1: a well-formed document has exactly ONE document
+			// element. Input that parses to no value at all — a prolog on its
+			// own, a lone comment, whitespace — satisfies every other rule and
+			// then yields nil, which the caller cannot distinguish from a
+			// successful parse of nothing. Treat it as the well-formedness
+			// error it is. Both nil and the engine's Undefined sentinel are
+			// listed: which one a no-value parse lands on depends on whether
+			// the start rule ran at all. Mirrors ts/src/xml.ts.
+			Result: &jsonic.ResultOptions{Fail: []any{nil, jsonic.Undefined}},
+			// ...and the same rule makes empty input ill-formed. The engine
+			// short-circuits "" before the rule loop, so Result.Fail never
+			// sees it; Lex.Empty governs that path.
+			Lex: &jsonic.LexOptions{Empty: boolPtr(false)},
 		})
 	}
 

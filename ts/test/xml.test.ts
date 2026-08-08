@@ -282,7 +282,7 @@ describe('decodeBOM', () => {
 // in go/xmlconf_test.go: counts valid/sa documents that parse and
 // not-wf/sa documents that are correctly rejected, requiring each
 // count to stay above a regression floor. Measured numbers are
-// 120/120 valid and 73/186 not-wf rejected.
+// 120/120 valid and 74/186 not-wf rejected.
 // ---------------------------------------------------------------------------
 
 const xmlconfRoot = join(__dirname, '..', '..', 'test', 'xmlconf')
@@ -292,7 +292,7 @@ const xmlconfAvailable = existsSync(join(xmlconfRoot, 'xmltest'))
 // conformance genuinely improves; never lower one to make a
 // regression pass.
 const VALID_SA_PASS_FLOOR = 120
-const NOT_WF_SA_REJECT_FLOOR = 73
+const NOT_WF_SA_REJECT_FLOOR = 74
 
 function xmlconfFiles(dir: string): string[] {
   if (!existsSync(dir)) return []
