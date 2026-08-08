@@ -45,6 +45,14 @@ const Version = "0.4.1"
 //	                                 entity. Default: true. When false,
 //	                                 references to unknown names are left
 //	                                 as-is in the output.
+//	strictNamespaces bool            enforce the Namespaces in XML 1.0 rule
+//	                                 that every prefix used on an element or
+//	                                 attribute name be bound by an in-scope
+//	                                 xmlns:prefix declaration. Default: false
+//	                                 — XML 1.0 well-formedness and Namespaces
+//	                                 in XML are separate specs, and an
+//	                                 unbound prefix only leaves `namespace`
+//	                                 unset.
 //	embed          bool              when true, keep Jsonic's JSON/JSONIC
 //	                                 grammar in place and splice an XML
 //	                                 literal alternate into the `val` rule
@@ -53,11 +61,12 @@ const Version = "0.4.1"
 //	                                 (default) the parser is reconfigured
 //	                                 as a pure-XML parser.
 var Defaults = map[string]any{
-	"namespaces":     true,
-	"entities":       true,
-	"customEntities": map[string]string{},
-	"strictEntities": true,
-	"embed":          false,
+	"namespaces":       true,
+	"entities":         true,
+	"customEntities":   map[string]string{},
+	"strictEntities":   true,
+	"strictNamespaces": false,
+	"embed":            false,
 }
 
 // Xml is the Jsonic plugin entry point. Register via:
@@ -76,6 +85,9 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 	entitiesOn := toBool(options["entities"], true)
 	customEntities := toStringMap(options["customEntities"])
 	strictEntities := toBool(options["strictEntities"], true)
+	// Namespace-constraint checking (unbound prefixes) is opt-in — XML
+	// 1.0 well-formedness does not require prefixes to be bound.
+	strictNamespaces := toBool(options["strictNamespaces"], false)
 	embed := toBool(options["embed"], false)
 
 	decode, declared := buildEntityDecoder(entitiesOn, customEntities)
@@ -111,10 +123,17 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 			},
 		},
 		Ender: []string{"<"},
+		// Error templates interpolate `{key}` against the failing
+		// token's `Use` details (plus code/src/pos/row/col); `$name` is
+		// not a placeholder syntax the engine understands, so never use
+		// it here — it would be emitted verbatim.
 		Error: map[string]string{
-			"xml_mismatched_tag":       "closing tag </$fsrc> does not match opening tag <$openname>",
-			"xml_invalid_tag":          "invalid tag: $fsrc",
-			"xml_unterminated":         "unterminated $kind",
+			"xml_mismatched_tag":       "closing tag </{closename}> does not match opening tag <{openname}>",
+			"xml_invalid_tag":          "invalid tag: {src}",
+			"unterminated_comment":     "unterminated comment: {src}",
+			"unterminated_cdata":       "unterminated CDATA section: {src}",
+			"unterminated_pi":          "unterminated processing instruction: {src}",
+			"unterminated_doctype":     "unterminated DOCTYPE declaration: {src}",
 			"comment_double_dash":      "comment body cannot contain \"--\"",
 			"cdata_terminator_in_text": "character data cannot contain \"]]>\"",
 			"pi_target_invalid":        "processing instruction target is missing or invalid",
@@ -125,11 +144,18 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 			"reserved_namespace":       "invalid use of a reserved namespace prefix or URI",
 			"unbound_prefix":           "element or attribute uses an undeclared namespace prefix",
 			"undeclared_entity":        "reference to undeclared entity",
+			"unparsed_entity_ref":      "reference to an unparsed (NDATA) entity",
+			"external_entity_in_attr":  "attribute value cannot reference an external entity",
+			"invalid_namespace_uri":    "namespace name cannot contain white space",
+			"text_at_top_level":        "character data is not allowed outside the root element",
 		},
 		Hint: map[string]string{
-			"xml_mismatched_tag":       "Each opening tag must be paired with a matching closing tag.\nExpected </$openname> but found </$fsrc>.",
+			"xml_mismatched_tag":       "Each opening tag must be paired with a matching closing tag.\nExpected </{openname}> but found </{closename}>.",
 			"xml_invalid_tag":          "The tag syntax is not valid XML.",
-			"xml_unterminated":         "The $kind starting at this position is not terminated.",
+			"unterminated_comment":     "The comment starting at this position has no closing \"-->\".",
+			"unterminated_cdata":       "The CDATA section starting at this position has no closing \"]]>\".",
+			"unterminated_pi":          "The processing instruction starting at this position has no closing \"?>\".",
+			"unterminated_doctype":     "The DOCTYPE declaration starting at this position has no closing \">\".",
 			"comment_double_dash":      "XML 1.0 disallows \"--\" inside a comment body.",
 			"cdata_terminator_in_text": "The literal \"]]>\" must only appear as the end of a CDATA section.",
 			"pi_target_invalid":        "A processing instruction must start with a Name; the XML declaration <?xml...?> is the special case.",
@@ -140,6 +166,10 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 			"reserved_namespace":       "The \"xml\" prefix is fixed to " + xmlNSURI + "; the \"xmlns\" prefix cannot be redeclared, and neither URI may be bound to any other prefix or as the default namespace.",
 			"unbound_prefix":           "Declare the prefix with xmlns:prefix=\"...\" on this element or one of its ancestors.",
 			"undeclared_entity":        "Declare the entity in the DOCTYPE internal subset, add it to the customEntities option, or set strictEntities: false to allow unresolved references through.",
+			"unparsed_entity_ref":      "XML 1.0 \u00a74.1 (WFC: Parsed Entity) — an entity declared with an NDATA notation is unparsed, and its name may only appear as the value of an ENTITY-typed attribute, never in an entity reference.",
+			"external_entity_in_attr":  "XML 1.0 \u00a74.1 (WFC: No External Entity References) — an attribute value may not reference an entity whose replacement text lives in an external file.",
+			"invalid_namespace_uri":    "A namespace name is a URI reference, and a URI reference cannot contain white space; note that a line break inside the declaration becomes a space under attribute-value normalisation.",
+			"text_at_top_level":        "An XML document is \"prolog element Misc*\": outside the single root element only comments, processing instructions and white space may appear.",
 		},
 	})
 
@@ -200,7 +230,7 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 			ctx.U["rootSeen"] = true
 			if namespacesOn {
 				if el, ok := r.Node.(map[string]any); ok {
-					if code := resolveNamespaces(el, nil); code != "" {
+					if code := resolveNamespaces(el, nil, strictNamespaces); code != "" {
 						ctx.ParseErr = &jsonic.Token{
 							Name: "#BD", Tin: jsonic.TinBD,
 							Err: code, Why: code, Src: code,
@@ -213,6 +243,19 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 		"@no-root-yet": jsonic.AltCond(func(_ *jsonic.Rule, ctx *jsonic.Context) bool {
 			seen, _ := ctx.U["rootSeen"].(bool)
 			return !seen
+		}),
+
+		// XML 1.0 §2.1 [1] document ::= prolog element Misc* — outside
+		// the root element only Misc (comments, PIs, white space) may
+		// appear, so character data before or after the root is not
+		// well-formed. Comments/PIs/DOCTYPE arrive as #XIG and are
+		// ignored by the token set, so only #TX needs policing.
+		"@doc-text-open": jsonic.AltAction(func(r *jsonic.Rule, ctx *jsonic.Context) {
+			checkDocText(r.O0, ctx)
+		}),
+
+		"@doc-text-close": jsonic.AltAction(func(r *jsonic.Rule, ctx *jsonic.Context) {
+			checkDocText(r.C0, ctx)
 		}),
 
 		"@element-open": jsonic.AltAction(func(r *jsonic.Rule, ctx *jsonic.Context) {
@@ -244,17 +287,16 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 			openName, _ := el["name"].(string)
 			closeName, _ := r.C0.Val.(string)
 			if openName != closeName {
-				// The Go parser's top-level error handling reports parse
-				// errors under a single "unexpected" code, so encode our
-				// specific error code into the token's `Src`: that string
-				// is substituted into the error detail via $fsrc and will
-				// appear in err.Error() for consumers (and tests) that
-				// want to key on the specific cause.
-				r.C0.Src = "xml_mismatched_tag: </" + closeName + "> does not match <" + openName + ">"
+				// Mark the offending close tag itself so the caret lands
+				// on `</b>`, and attach the two names as `Use` details —
+				// the parser injects the bad token's `Use` into the
+				// message and hint templates, which is where the
+				// `{openname}` / `{closename}` placeholders resolve from.
 				if r.C0.Use == nil {
 					r.C0.Use = map[string]any{}
 				}
 				r.C0.Use["openname"] = openName
+				r.C0.Use["closename"] = closeName
 				r.C0.Err = "xml_mismatched_tag"
 				ctx.ParseErr = r.C0
 			}
@@ -294,12 +336,12 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 			"xml": {
 				Open: []*jsonic.GrammarAltSpec{
 					{S: "#ZZ"},
-					{S: "#TX", R: "xml"},
+					{S: "#TX", R: "xml", A: "@doc-text-open"},
 					{P: "element", C: "@no-root-yet"},
 				},
 				Close: []*jsonic.GrammarAltSpec{
 					{S: "#ZZ"},
-					{S: "#TX", R: "xml"},
+					{S: "#TX", R: "xml", A: "@doc-text-close"},
 				},
 			},
 			"element": {
@@ -363,7 +405,7 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 					if r.Parent != nil && r.Parent != jsonic.NoRule &&
 						r.Parent.Name == "val" {
 						if el, ok := r.Node.(map[string]any); ok {
-							resolveNamespaces(el, nil)
+							resolveNamespaces(el, nil, strictNamespaces)
 						}
 					}
 				})
@@ -402,6 +444,29 @@ func dtdAttrDefaults(ctx *jsonic.Context) map[string]map[string]string {
 	}
 	m, _ := ctx.U["dtdAttrDefaults"].(map[string]map[string]string)
 	return m
+}
+
+// checkDocText enforces XML 1.0 §2.1 [1]
+// `document ::= prolog element Misc*`: at document level (before the
+// prolog's root element, and after it) only Misc — comments, PIs, and
+// white space — is allowed. Anything else is character data outside the
+// root element and is not well-formed.
+func checkDocText(tkn *jsonic.Token, ctx *jsonic.Context) {
+	if tkn == nil || ctx == nil {
+		return
+	}
+	s, ok := tkn.Val.(string)
+	if !ok {
+		return
+	}
+	if strings.Trim(s, " \t\n\r") == "" {
+		return
+	}
+	const code = "text_at_top_level"
+	ctx.ParseErr = &jsonic.Token{
+		Name: "#BD", Tin: jsonic.TinBD,
+		Err: code, Why: code, Src: code,
+	}
 }
 
 // applyAttrDefaults merges in DOCTYPE-supplied default attribute
@@ -535,18 +600,38 @@ func parseDoctypeAttlists(body string) map[string]map[string]string {
 	return out
 }
 
-// parseDoctypeEntities scans a DOCTYPE internal-subset body and
-// extracts every internal general entity declaration of the form
-// `<!ENTITY name "value">` (or single-quoted). Parameter entity
-// declarations (`<!ENTITY % name ...>`) and external entity
-// declarations (`<!ENTITY name SYSTEM "...">` etc.) are skipped, as
-// are `<!ELEMENT`, `<!ATTLIST`, and `<!NOTATION` declarations.
+// doctypeEntities is the result of scanning a DOCTYPE internal subset
+// for general entity declarations.
 //
-// Returned values are stored verbatim — character and entity
-// references inside an entity value are expanded only when the
-// outer entity is referenced.
-func parseDoctypeEntities(body string) map[string]string {
-	out := map[string]string{}
+//	Internal - `<!ENTITY name "value">`; values are stored verbatim,
+//	           character and entity references inside an entity value
+//	           are expanded only when the outer entity is referenced.
+//	External - `<!ENTITY name SYSTEM "...">` / `PUBLIC ...`. These
+//	           entities ARE declared, so a reference to one satisfies
+//	           the §4.1 "Entity Declared" well-formedness constraint,
+//	           but we never fetch the replacement text, so the
+//	           reference is left unexpanded in the output (§4.4.3,
+//	           "not included": a non-validating processor may skip an
+//	           external entity).
+//	Unparsed - external entities carrying an `NDATA` notation. §4.1
+//	           WFC "Parsed Entity" forbids referencing these at all;
+//	           they may only appear as ENTITY-typed attribute values.
+type doctypeEntities struct {
+	Internal map[string]string
+	External map[string]string
+	Unparsed map[string]string
+}
+
+// parseDoctypeEntities scans a DOCTYPE internal-subset body and
+// extracts every general entity declaration. Parameter entity
+// declarations (`<!ENTITY % name ...>`) are skipped, as are
+// `<!ELEMENT`, `<!ATTLIST`, and `<!NOTATION` declarations.
+func parseDoctypeEntities(body string) doctypeEntities {
+	out := doctypeEntities{
+		Internal: map[string]string{},
+		External: map[string]string{},
+		Unparsed: map[string]string{},
+	}
 	i := 0
 	for i < len(body) {
 		idx := strings.Index(body[i:], "<!ENTITY")
@@ -576,7 +661,7 @@ func parseDoctypeEntities(body string) map[string]string {
 		for j < len(body) && isSpace(body[j]) {
 			j++
 		}
-		// Quoted value -> internal entity. SYSTEM/PUBLIC -> skip.
+		// Quoted value -> internal entity.
 		if j < len(body) && (body[j] == '"' || body[j] == '\'') {
 			quote := body[j]
 			j++
@@ -587,16 +672,86 @@ func parseDoctypeEntities(body string) map[string]string {
 			if j >= len(body) {
 				break
 			}
-			out[name] = body[valStart:j]
+			out.Internal[name] = body[valStart:j]
 			j++
+			end := strings.Index(body[j:], ">")
+			if end < 0 {
+				break
+			}
+			i = j + end + 1
+			continue
 		}
 		end := strings.Index(body[j:], ">")
+		tail := body[j:]
+		if end >= 0 {
+			tail = body[j : j+end]
+		}
+		if strings.HasPrefix(tail, "SYSTEM") || strings.HasPrefix(tail, "PUBLIC") {
+			// External entity: declared, but never fetched. An `NDATA`
+			// notation makes it an *unparsed* entity, which may not be
+			// referenced at all.
+			if ndataRE.MatchString(tail) {
+				out.Unparsed[name] = ""
+			} else {
+				out.External[name] = ""
+			}
+		}
 		if end < 0 {
 			break
 		}
 		i = j + end + 1
 	}
 	return out
+}
+
+// ndataRE spots the NDATA notation marker of an unparsed entity
+// declaration (§4.2.2 [76] `NDataDecl ::= S 'NDATA' S Name`).
+var ndataRE = regexp.MustCompile(`(^|[\s"'])NDATA([\s"']|$)`)
+
+// peRefRE spots a parameter-entity reference in an internal subset.
+// XML 1.0 §4.1 (WFC: Entity Declared) treats declarations inside a
+// parameter entity exactly like declarations in an unread external
+// subset: a non-validating processor need not process them, so an
+// otherwise-undeclared entity is not a well-formedness error.
+var peRefRE = regexp.MustCompile(`%[A-Za-z_:][A-Za-z0-9_\-.:]*;`)
+
+// externalIDRE spots an ExternalID in a DOCTYPE head (§2.8 [75]:
+// `ExternalID ::= 'SYSTEM' S SystemLiteral | 'PUBLIC' S PubidLiteral S
+// SystemLiteral`).
+var externalIDRE = regexp.MustCompile(`(^|[\s>])(SYSTEM|PUBLIC)([\s"'])`)
+
+// standaloneYesRE spots a `standalone="yes"` standalone document
+// declaration in an XML declaration (§2.9 [32]).
+var standaloneYesRE = regexp.MustCompile(`\bstandalone\s*=\s*("yes"|'yes')`)
+
+// entityDeclState collects what the current parse knows about entity
+// declarations, for the §4.1 "Entity Declared" well-formedness check.
+type entityDeclState struct {
+	// External general entities: declared, but never fetched.
+	External map[string]string
+	// Unparsed (NDATA) entities: may never be referenced.
+	Unparsed map[string]string
+	// Unread is true only when part of the DTD went unread AND the
+	// document did not declare `standalone="yes"` — with
+	// `standalone="yes"` the document asserts that nothing outside the
+	// internal subset matters, so the constraint applies again.
+	Unread bool
+}
+
+// entDeclState reads the entity-declaration state off the lex context.
+func entDeclState(lex *jsonic.Lex) entityDeclState {
+	if lex == nil || lex.Ctx == nil || lex.Ctx.U == nil {
+		return entityDeclState{}
+	}
+	ext, _ := lex.Ctx.U["dtdExternalEntities"].(map[string]string)
+	unp, _ := lex.Ctx.U["dtdUnparsedEntities"].(map[string]string)
+	unread, _ := lex.Ctx.U["dtdUnread"].(bool)
+	standalone, _ := lex.Ctx.U["xmlStandalone"].(bool)
+	return entityDeclState{
+		External: ext,
+		Unparsed: unp,
+		Unread:   unread && !standalone,
+	}
 }
 
 // xmlDepth reads the per-parse XML nesting counter from the lex context.
@@ -798,10 +953,18 @@ func buildXmlTagMatcher(
 			sI := pnt.SI
 
 			// Strip a UTF-8 byte-order mark at the very start of input.
+			// The BOM is not part of the document, so skip it and carry
+			// on matching in this same call — returning nil here would
+			// hand control back to a lexer that has no other matcher
+			// enabled in pure mode, and the following `<?xml` would be
+			// reported as an unexpected character.
 			if sI == 0 && srclen >= 3 &&
 				src[0] == 0xef && src[1] == 0xbb && src[2] == 0xbf {
+				// The BOM occupies no display column, so only the source
+				// index advances; token positions stay aligned with the
+				// document text proper.
 				pnt.SI = 3
-				return nil
+				sI = 3
 			}
 
 			// Inside an open XML element (depth > 0), consume
@@ -824,7 +987,9 @@ func buildXmlTagMatcher(
 					if strings.Contains(raw, "]]>") {
 						return lex.Bad("cdata_terminator_in_text")
 					}
-					if code := checkEntityRefs(raw, dtdEntities(lex), declared, strict); code != "" {
+					if code := checkEntityRefs(
+						raw, dtdEntities(lex), declared, strict,
+						entDeclState(lex), false); code != "" {
 						return lex.Bad(code)
 					}
 					// §2.11 end-of-line normalisation.
@@ -847,7 +1012,7 @@ func buildXmlTagMatcher(
 			if strings.HasPrefix(src[sI:], "<!--") {
 				end := strings.Index(src[sI+4:], "-->")
 				if end < 0 {
-					return lex.Bad("unterminated_comment")
+					return badSpan(lex, "unterminated_comment", sI, srclen)
 				}
 				bodyStart := sI + 4
 				bodyEnd := bodyStart + end
@@ -871,7 +1036,7 @@ func buildXmlTagMatcher(
 				body := sI + 9
 				end := strings.Index(src[body:], "]]>")
 				if end < 0 {
-					return lex.Bad("unterminated_cdata")
+					return badSpan(lex, "unterminated_cdata", sI, srclen)
 				}
 				finish := body + end + 3
 				text := src[body : body+end]
@@ -892,6 +1057,28 @@ func buildXmlTagMatcher(
 				subsetStart, subsetEnd := -1, -1
 				for i < srclen {
 					ch := src[i]
+					// Skip over comments and processing instructions
+					// first: their bodies are opaque text, so an
+					// apostrophe (`doesn't`) or a `>` inside one must
+					// not be read as markup.
+					if strings.HasPrefix(src[i:], "<!--") {
+						ce := strings.Index(src[i+4:], "-->")
+						if ce < 0 {
+							i = srclen
+							break
+						}
+						i = i + 4 + ce + 3
+						continue
+					}
+					if strings.HasPrefix(src[i:], "<?") {
+						pe := strings.Index(src[i+2:], "?>")
+						if pe < 0 {
+							i = srclen
+							break
+						}
+						i = i + 2 + pe + 2
+						continue
+					}
 					// Skip over quoted strings so `]` and `>` inside an
 					// entity value or attribute default cannot terminate
 					// the subset prematurely.
@@ -921,9 +1108,32 @@ func buildXmlTagMatcher(
 					i++
 				}
 				if i >= srclen {
-					return lex.Bad("unterminated_doctype")
+					return badSpan(lex, "unterminated_doctype", sI, srclen)
 				}
 				finish := i + 1
+				if lex.Ctx != nil {
+					if lex.Ctx.U == nil {
+						lex.Ctx.U = map[string]any{}
+					}
+
+					// XML 1.0 §4.1, WFC "Entity Declared": the constraint
+					// that a referenced entity be declared applies only
+					// when the processor has seen every declaration. If
+					// the DOCTYPE names an external subset — which we
+					// never fetch — then (unless the document declares
+					// `standalone="yes"`) an undeclared entity is NOT a
+					// well-formedness error. The head of the DOCTYPE is
+					// everything up to the internal subset's `[`, or up
+					// to the closing `>` when there is no internal
+					// subset.
+					headEnd := i
+					if subsetStart >= 0 {
+						headEnd = subsetStart - 1
+					}
+					if externalIDRE.MatchString(src[sI+9 : headEnd]) {
+						lex.Ctx.U["dtdUnread"] = true
+					}
+				}
 				// Extract internal-subset declarations and stash them
 				// on the per-parse context. The matcher's text /
 				// attribute paths and the element actions read these
@@ -933,15 +1143,48 @@ func buildXmlTagMatcher(
 					if lex.Ctx.U == nil {
 						lex.Ctx.U = map[string]any{}
 					}
-					if found := parseDoctypeEntities(subset); len(found) > 0 {
+
+					// A parameter-entity reference in the internal subset
+					// hides declarations from a non-validating processor
+					// just as an external subset does.
+					if peRefRE.MatchString(subset) {
+						lex.Ctx.U["dtdUnread"] = true
+					}
+
+					found := parseDoctypeEntities(subset)
+					if len(found.Internal) > 0 {
 						existing, _ := lex.Ctx.U["dtdEntities"].(map[string]string)
 						if existing == nil {
 							existing = map[string]string{}
 						}
-						for k, v := range found {
+						for k, v := range found.Internal {
 							existing[k] = v
 						}
 						lex.Ctx.U["dtdEntities"] = existing
+					}
+					// Externally-declared general entities are declared
+					// (so a reference to one is well-formed) but
+					// unresolvable, so they are tracked apart from the
+					// expandable ones.
+					if len(found.External) > 0 {
+						existing, _ := lex.Ctx.U["dtdExternalEntities"].(map[string]string)
+						if existing == nil {
+							existing = map[string]string{}
+						}
+						for k, v := range found.External {
+							existing[k] = v
+						}
+						lex.Ctx.U["dtdExternalEntities"] = existing
+					}
+					if len(found.Unparsed) > 0 {
+						existing, _ := lex.Ctx.U["dtdUnparsedEntities"].(map[string]string)
+						if existing == nil {
+							existing = map[string]string{}
+						}
+						for k, v := range found.Unparsed {
+							existing[k] = v
+						}
+						lex.Ctx.U["dtdUnparsedEntities"] = existing
 					}
 					if found := parseDoctypeAttlists(subset); len(found) > 0 {
 						existing, _ := lex.Ctx.U["dtdAttrDefaults"].(map[string]map[string]string)
@@ -969,11 +1212,11 @@ func buildXmlTagMatcher(
 			if sI+1 < srclen && src[sI+1] == '?' {
 				end := strings.Index(src[sI+2:], "?>")
 				if end < 0 {
-					return lex.Bad("unterminated_pi")
+					return badSpan(lex, "unterminated_pi", sI, srclen)
 				}
 				bodyEnd := sI + 2 + end
 				// WF: PI target must be a Name.
-				_, after, ok := readName(src, sI+2)
+				target, after, ok := readName(src, sI+2)
 				if !ok || after > bodyEnd {
 					return lex.Bad("pi_target_invalid")
 				}
@@ -982,6 +1225,19 @@ func buildXmlTagMatcher(
 				}
 				if code := checkChars(src[sI+2 : bodyEnd]); code != "" {
 					return lex.Bad(code)
+				}
+				// The XML declaration's standalone document declaration
+				// (§2.9) decides whether the §4.1 "Entity Declared"
+				// constraint still applies when part of the DTD went
+				// unread — with `standalone="yes"` the document promises
+				// there is nothing relevant out there, so an undeclared
+				// entity is an error again.
+				if target == "xml" && lex.Ctx != nil &&
+					standaloneYesRE.MatchString(src[after:bodyEnd]) {
+					if lex.Ctx.U == nil {
+						lex.Ctx.U = map[string]any{}
+					}
+					lex.Ctx.U["xmlStandalone"] = true
 				}
 				finish := bodyEnd + 2
 				tsrc := src[sI:finish]
@@ -995,14 +1251,14 @@ func buildXmlTagMatcher(
 				name, after, ok := readName(src, sI+2)
 				// WF: empty close tag `</>` is invalid.
 				if !ok {
-					return lex.Bad("xml_invalid_tag")
+					return badSpan(lex, "xml_invalid_tag", sI, minInt(srclen, sI+3))
 				}
 				i := after
 				for i < srclen && isSpace(src[i]) {
 					i++
 				}
 				if i >= srclen || src[i] != '>' {
-					return lex.Bad("xml_invalid_tag")
+					return badSpan(lex, "xml_invalid_tag", sI, i+1)
 				}
 				finish := i + 1
 				tsrc := src[sI:finish]
@@ -1026,7 +1282,7 @@ func buildXmlTagMatcher(
 					i++
 				}
 				if i >= srclen {
-					return lex.Bad("xml_invalid_tag")
+					return badSpan(lex, "xml_invalid_tag", sI, srclen)
 				}
 
 				// End of tag.
@@ -1051,13 +1307,13 @@ func buildXmlTagMatcher(
 
 				// Attributes must be separated by whitespace.
 				if wsStart == i {
-					return lex.Bad("xml_invalid_tag")
+					return badSpan(lex, "xml_invalid_tag", sI, i+1)
 				}
 
 				// Attribute name.
 				attrName, attrEnd, ok := readName(src, i)
 				if !ok {
-					return lex.Bad("xml_invalid_tag")
+					return badSpan(lex, "xml_invalid_tag", sI, i+1)
 				}
 				i = attrEnd
 
@@ -1065,7 +1321,7 @@ func buildXmlTagMatcher(
 					i++
 				}
 				if i >= srclen || src[i] != '=' {
-					return lex.Bad("xml_invalid_tag")
+					return badSpan(lex, "xml_invalid_tag", sI, i+1)
 				}
 				i++
 				for i < srclen && isSpace(src[i]) {
@@ -1073,11 +1329,11 @@ func buildXmlTagMatcher(
 				}
 
 				if i >= srclen {
-					return lex.Bad("xml_invalid_tag")
+					return badSpan(lex, "xml_invalid_tag", sI, srclen)
 				}
 				quote := src[i]
 				if quote != '"' && quote != '\'' {
-					return lex.Bad("xml_invalid_tag")
+					return badSpan(lex, "xml_invalid_tag", sI, i+1)
 				}
 				i++
 				valStart := i
@@ -1091,7 +1347,7 @@ func buildXmlTagMatcher(
 					i++
 				}
 				if i >= srclen {
-					return lex.Bad("xml_invalid_tag")
+					return badSpan(lex, "xml_invalid_tag", sI, srclen)
 				}
 				raw := src[valStart:i]
 				i++ // consume closing quote
@@ -1099,7 +1355,9 @@ func buildXmlTagMatcher(
 				if code := checkChars(raw); code != "" {
 					return lex.Bad(code)
 				}
-				if code := checkEntityRefs(raw, dtdEntities(lex), declared, strict); code != "" {
+				if code := checkEntityRefs(
+					raw, dtdEntities(lex), declared, strict,
+					entDeclState(lex), true); code != "" {
 					return lex.Bad(code)
 				}
 				if _, ok := attrs[attrName]; ok {
@@ -1193,7 +1451,15 @@ func checkChars(s string) string {
 //	&name;     - name must start with a NameStartChar
 //	&#nnnn;    - decimal numeric character reference
 //	&#xhhhh;   - hexadecimal numeric character reference
-func checkEntityRefs(s string, dtd, declared map[string]string, strict bool) string {
+//
+// `entdecl` describes what the processor knows about the DTD (see
+// entityDeclState). `inAttr` marks a scan of an attribute value, where
+// §4.1 WFC "No External Entity References" additionally forbids
+// referencing any external entity.
+func checkEntityRefs(
+	s string, dtd, declared map[string]string, strict bool,
+	entdecl entityDeclState, inAttr bool,
+) string {
 	for i := 0; i < len(s); i++ {
 		if s[i] != '&' {
 			continue
@@ -1211,10 +1477,14 @@ func checkEntityRefs(s string, dtd, declared map[string]string, strict bool) str
 			if len(ref) < 2 {
 				return "bad_entity_ref"
 			}
+			// XML 1.0 §4.1 [66]:
+			//   CharRef ::= '&#' [0-9]+ ';' | '&#x' [0-9a-fA-F]+ ';'
+			// The `x` marker is lowercase-only — `&#X26;` is NOT a
+			// character reference, and since `X26` is not a Name it is
+			// not an entity reference either, so it is not well-formed.
 			var digits string
-			var hex bool
-			if ref[1] == 'x' || ref[1] == 'X' {
-				hex = true
+			hex := ref[1] == 'x'
+			if hex {
 				digits = ref[2:]
 			} else {
 				digits = ref[1:]
@@ -1255,8 +1525,22 @@ func checkEntityRefs(s string, dtd, declared map[string]string, strict bool) str
 				}
 				j += sz
 			}
-			// §4.1: in strict mode the named entity must resolve.
-			if strict {
+			// §4.1 WFC "Parsed Entity": an entity reference must not
+			// name an unparsed (NDATA) entity, anywhere.
+			if _, ok := entdecl.Unparsed[ref]; ok {
+				return "unparsed_entity_ref"
+			}
+			if _, ok := entdecl.External[ref]; ok {
+				// Declared externally: the "Entity Declared" WFC is
+				// satisfied and the replacement text is simply not
+				// included. But §4.1 WFC "No External Entity References"
+				// forbids the reference in an attribute value.
+				if inAttr {
+					return "external_entity_in_attr"
+				}
+			} else if strict && !entdecl.Unread {
+				// §4.1 WFC "Entity Declared" — suspended when the
+				// processor never got to see the whole DTD.
 				if _, ok := declared[ref]; !ok {
 					if _, ok := dtd[ref]; !ok {
 						return "undeclared_entity"
@@ -1293,8 +1577,11 @@ const (
 // `prefix`, `localName`, `namespace`, `space` and `lang` fields
 // resolved from xmlns / xmlns:* / xml:space / xml:lang attributes
 // in scope. Returns "" on success or an error code on the first
-// reserved-prefix or unbound-prefix violation.
-func resolveNamespaces(element map[string]any, scope map[string]string) string {
+// reserved-prefix, invalid-namespace-URI or (when `strict`)
+// unbound-prefix violation.
+func resolveNamespaces(
+	element map[string]any, scope map[string]string, strict bool,
+) string {
 	// Pre-bind the reserved xml prefix so xml:space / xml:lang
 	// qualify without an explicit declaration.
 	ns := make(map[string]string, len(scope)+1)
@@ -1302,10 +1589,28 @@ func resolveNamespaces(element map[string]any, scope map[string]string) string {
 		ns[k] = v
 	}
 	ns["xml"] = xmlNSURI
-	return resolveScope(element, xmlScope{ns: ns, space: "default", lang: ""})
+	return resolveScope(
+		element, xmlScope{ns: ns, space: "default", lang: ""}, strict)
 }
 
-func resolveScope(element map[string]any, scope xmlScope) string {
+// invalidNamespaceURI reports whether `uri` contains white space. A
+// namespace name is a URI reference (Namespaces in XML 1.0 §2, RFC
+// 3986), and a URI reference cannot contain white space.
+// Attribute-value normalisation (§3.3.3) has already turned any literal
+// TAB/LF/CR in the declaration into a space by the time we see it, so a
+// space here means the source held white space inside the namespace
+// name.
+func invalidNamespaceURI(uri string) bool {
+	for i := 0; i < len(uri); i++ {
+		switch uri[i] {
+		case ' ', '\t', '\n', '\r':
+			return true
+		}
+	}
+	return false
+}
+
+func resolveScope(element map[string]any, scope xmlScope, strict bool) string {
 	local := xmlScope{
 		ns:    make(map[string]string, len(scope.ns)+4),
 		space: scope.space,
@@ -1315,12 +1620,22 @@ func resolveScope(element map[string]any, scope xmlScope) string {
 		local.ns[k] = v
 	}
 	if attrs, ok := element["attributes"].(map[string]any); ok {
+		// Pass 1: every namespace declaration on this element, plus
+		// xml:space / xml:lang. Namespaces in XML 1.0 §5.2 scopes a
+		// declaration over the whole element it appears on, *including
+		// that element's own other attributes* — so all declarations
+		// must be in hand before any prefixed name is resolved.
+		// Resolving in a single pass made binding depend on attribute
+		// order, wrongly rejecting `<a p:x="1" xmlns:p="..."/>`.
 		for k, v := range attrs {
 			s, _ := v.(string)
 			switch {
 			case k == "xmlns":
 				if s == xmlNSURI || s == xmlnsNSURI {
 					return "reserved_namespace"
+				}
+				if invalidNamespaceURI(s) {
+					return "invalid_namespace_uri"
 				}
 				local.ns[""] = s
 			case strings.HasPrefix(k, "xmlns:"):
@@ -1337,18 +1652,30 @@ func resolveScope(element map[string]any, scope xmlScope) string {
 						return "reserved_namespace"
 					}
 				}
+				if invalidNamespaceURI(s) {
+					return "invalid_namespace_uri"
+				}
 				local.ns[prefix] = s
 			case k == "xml:space":
 				local.space = s
 			case k == "xml:lang":
 				local.lang = s
-			default:
+			}
+		}
+
+		// Pass 2: resolve prefixed attribute names against the
+		// completed in-scope declarations. Namespace-constraint only
+		// (see the strictNamespaces option): an unbound prefix on an
+		// attribute name leaves the attribute unqualified but keeps the
+		// document XML 1.0 well-formed.
+		if strict {
+			for k := range attrs {
+				if k == "xmlns" || strings.HasPrefix(k, "xmlns:") {
+					continue
+				}
 				if colon := strings.Index(k, ":"); colon > 0 {
-					ap := k[:colon]
-					if ap != "xmlns" {
-						if _, ok := local.ns[ap]; !ok {
-							return "unbound_prefix"
-						}
+					if _, ok := local.ns[k[:colon]]; !ok {
+						return "unbound_prefix"
 					}
 				}
 			}
@@ -1362,9 +1689,12 @@ func resolveScope(element map[string]any, scope xmlScope) string {
 		element["localName"] = name[idx+1:]
 		if uri, ok := local.ns[prefix]; ok {
 			element["namespace"] = uri
-		} else {
+		} else if strict {
 			return "unbound_prefix"
 		}
+		// Not strict: leave `namespace` unset — the element is named but
+		// unqualified, which is what a namespace-unaware (yet XML 1.0
+		// conformant) consumer sees.
 	} else {
 		element["localName"] = name
 		if uri, ok := local.ns[""]; ok {
@@ -1382,7 +1712,7 @@ func resolveScope(element map[string]any, scope xmlScope) string {
 	children, _ := element["children"].([]any)
 	for _, c := range children {
 		if ce, ok := c.(map[string]any); ok {
-			if err := resolveScope(ce, local); err != "" {
+			if err := resolveScope(ce, local, strict); err != "" {
 				return err
 			}
 		}
@@ -1391,6 +1721,33 @@ func resolveScope(element map[string]any, scope xmlScope) string {
 }
 
 // --- helpers ---
+
+// badSpan is lex.Bad with the offending source span attached. The Go
+// engine's Bad() leaves Token.Src empty (the TS lexer's
+// bad(code, start, end) fills it), and Src is what the `{src}`
+// placeholder in an error template interpolates — and what sizes the
+// caret run under the offending text.
+func badSpan(lex *jsonic.Lex, why string, from, to int) *jsonic.Token {
+	tkn := lex.Bad(why)
+	src := lex.Src
+	if from < 0 {
+		from = 0
+	}
+	if to > len(src) {
+		to = len(src)
+	}
+	if from < to {
+		tkn.Src = src[from:to]
+	}
+	return tkn
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
 
 func advance(pnt *jsonic.Point, from, to int) {
 	pnt.SI = to

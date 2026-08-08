@@ -7,11 +7,19 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
 	jsonic "github.com/tabnas/jsonic/go"
 )
+
+// ansiRE matches the SGR colour sequences the engine writes into
+// rendered error messages, so the `msg` spec column can be plain text.
+var ansiRE = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+func stripANSI(s string) string { return ansiRE.ReplaceAllString(s, "") }
 
 // asMap returns the string-keyed map underlying a parsed object,
 // accepting both the insertion-ordered *jsonic.OrderedMap that the parser
@@ -34,6 +42,7 @@ type specEntry struct {
 	Input    string // Escape-decoded XML source.
 	Expected string // Raw cell: JSON text, or "ERROR" / "ERROR:code".
 	Opts     string // Raw JSON (may be empty).
+	Msg      string // Substring the error message must contain (may be empty).
 }
 
 // specDir returns the absolute path to the shared TSV spec directory.
@@ -77,6 +86,9 @@ func loadSpec(t *testing.T, path string) []specEntry {
 		if len(cols) >= 4 {
 			entry.Opts = cols[3]
 		}
+		if len(cols) >= 5 {
+			entry.Msg = cols[4]
+		}
 		out = append(out, entry)
 	}
 	if err := scanner.Err(); err != nil {
@@ -86,9 +98,11 @@ func loadSpec(t *testing.T, path string) []specEntry {
 }
 
 // unescapeInput decodes the escape sequences used in the `input`
-// column of the TSV spec: \n (LF), \r (CR), \t (TAB), \\ (backslash).
-// Any other `\x` sequence is left intact so XML escapes like `\d` are
-// not accidentally rewritten.
+// column of the TSV spec: \n (LF), \r (CR), \t (TAB), \\ (backslash),
+// and \uXXXX (a BMP code point, for characters that must not be written
+// literally into the fixture — a leading U+FEFF byte-order mark above
+// all). Any other `\x` sequence is left intact so XML escapes like `\d`
+// are not accidentally rewritten.
 func unescapeInput(s string) string {
 	if !strings.Contains(s, `\`) {
 		return s
@@ -115,6 +129,14 @@ func unescapeInput(s string) string {
 				b.WriteByte('\\')
 				i++
 				continue
+			case 'u':
+				if i+5 < len(s) {
+					if cp, err := strconv.ParseUint(s[i+2:i+6], 16, 32); err == nil {
+						b.WriteRune(rune(cp))
+						i += 5
+						continue
+					}
+				}
 			}
 		}
 		b.WriteByte(c)
@@ -177,6 +199,14 @@ func runSpecFile(t *testing.T, path string) {
 				}
 				if errCode != "" && !strings.Contains(err.Error(), errCode) {
 					t.Fatalf("expected error code %q, got %q", errCode, err.Error())
+				}
+				// The optional 5th column pins the rendered message, so
+				// a template that stops interpolating (leaving a literal
+				// placeholder behind) fails here rather than silently
+				// shipping.
+				if entry.Msg != "" && !strings.Contains(stripANSI(err.Error()), entry.Msg) {
+					t.Fatalf("expected error message to contain %q, got %q",
+						entry.Msg, stripANSI(err.Error()))
 				}
 				return
 			}

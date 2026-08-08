@@ -109,6 +109,7 @@ type XmlOptions = {
   entities: boolean                       // default: true
   customEntities: Record<string, string>  // default: {}
   strictEntities: boolean                 // default: true
+  strictNamespaces: boolean               // default: false
   embed: boolean                          // default: false
 }
 ```
@@ -122,12 +123,20 @@ annotated with `prefix`, `localName`, and the resolved `namespace` URI
 from `xmlns` / `xmlns:*` declarations in scope. The reserved `xml`
 prefix is pre-bound; `xml:space` and `xml:lang` are interpreted and
 surfaced as `space` / `lang`. Misuse of a reserved prefix or URI raises
-`reserved_namespace`; a name using an undeclared prefix raises
-`unbound_prefix`.
+`reserved_namespace`, and a namespace name containing white space raises
+`invalid_namespace_uri` (a namespace name is a URI reference, and a URI
+reference cannot contain white space). A name using an *undeclared*
+prefix is not an error by default — see `strictNamespaces`.
+
+Namespace declarations are collected in a first pass over the element's
+attributes and prefixed names resolved in a second, because Namespaces
+in XML 1.0 §5.2 scopes a declaration over the whole element it appears
+on — including that element's own other attributes. Binding therefore
+does not depend on attribute order: `<a p:x="1" xmlns:p="…"/>` and
+`<a xmlns:p="…" p:x="1"/>` behave identically.
 
 When `false`, no resolution runs: `xmlns` declarations stay as plain
-attributes, no `namespace` field is added, and unbound prefixes are not
-errors.
+attributes and no `prefix` / `localName` / `namespace` fields are added.
 
 ### `entities`
 
@@ -159,6 +168,32 @@ entity (predefined, `customEntities`, or a DOCTYPE `<!ENTITY>`); an
 unknown name raises `undeclared_entity` (XML 1.0 §4.1). When `false`,
 references to unknown names are left verbatim in the output — useful for
 templating. Numeric references and the syntactic check are unaffected.
+
+Even when `true`, XML 1.0 §4.1 (WFC: Entity Declared) suspends the
+requirement when the processor could not have seen every declaration:
+if the DOCTYPE names an external subset, or the internal subset contains
+a parameter-entity reference, and the document does not declare
+`standalone="yes"`, an unknown entity name is left verbatim instead of
+raising. External general entities declared in the internal subset
+(`<!ENTITY e SYSTEM "…">`) are likewise *declared* — referencing one is
+well-formed — but are never fetched, so the reference stays verbatim.
+Two constraints still hold: an external entity may not be referenced in
+an attribute value (`external_entity_in_attr`), and an unparsed `NDATA`
+entity may not be referenced at all (`unparsed_entity_ref`).
+
+### `strictNamespaces`
+
+`boolean`, default `false`.
+
+XML 1.0 well-formedness and Namespaces in XML 1.0 are **separate specs**.
+`<a><foo:b/></a>` is a well-formed XML document — `foo:b` is a legal Name
+— it is merely not *namespace*-well-formed. This parser implements XML
+1.0, so by default an unbound prefix is not an error: the element still
+gets `prefix` and `localName`, and `namespace` is simply absent.
+
+Set to `true` to additionally enforce the namespace constraint, so an
+element or attribute name using a prefix with no in-scope
+`xmlns:prefix` declaration raises `unbound_prefix`.
 
 ### `embed`
 
@@ -273,7 +308,6 @@ message, and a longer hint; the specific error code appears in the text.
 | -------------------------- | ---------------------------------------------------------- |
 | `xml_mismatched_tag`       | A close tag does not match its open tag.                   |
 | `xml_invalid_tag`          | A tag's syntax is not valid XML.                           |
-| `xml_unterminated`         | A construct is not terminated (also `unterminated_*`).     |
 | `comment_double_dash`      | `--` appears inside a comment body.                        |
 | `cdata_terminator_in_text` | `]]>` appears in character data outside CDATA.             |
 | `pi_target_invalid`        | A processing instruction has a missing/invalid target.     |
@@ -284,6 +318,14 @@ message, and a longer hint; the specific error code appears in the text.
 | `reserved_namespace`       | Misuse of a reserved namespace prefix or URI.              |
 | `unbound_prefix`           | An element/attribute uses an undeclared prefix.            |
 | `undeclared_entity`        | A reference to an undeclared entity (strict mode).         |
+| `unparsed_entity_ref`      | A reference to an unparsed (`NDATA`) entity (§4.1).        |
+| `external_entity_in_attr`  | An attribute value references an external entity (§4.1).   |
+| `invalid_namespace_uri`    | A namespace name contains white space.                     |
+| `text_at_top_level`        | Character data outside the root element (§2.1).            |
+| `unterminated_comment`     | A comment with no closing `-->`.                           |
+| `unterminated_cdata`       | A CDATA section with no closing `]]>`.                     |
+| `unterminated_pi`          | A processing instruction with no closing `?>`.             |
+| `unterminated_doctype`     | A DOCTYPE declaration with no closing `>`.                 |
 
 ## Token model
 

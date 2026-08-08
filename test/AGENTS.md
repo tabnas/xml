@@ -12,9 +12,17 @@ file opens with a legend naming the columns.
 | Column | Meaning |
 |---|---|
 | `name` | Unique case identifier — it names the sub-test in both runtimes. |
-| `input` | XML source. Escapes `\n` `\r` `\t` `\\` are decoded. |
+| `input` | XML source. Escapes `\n` `\r` `\t` `\\` `\uXXXX` are decoded. |
 | `expected` | The parse result as JSON, or `ERROR` / `ERROR:<code>` for input that must be rejected. |
 | `opts` | Optional JSON object of plugin options (empty means defaults). |
+| `msg` | Optional substring the rendered error message must contain. Only meaningful alongside an `ERROR` expectation; it exists so a message template that stops interpolating (and emits a literal `{openname}` / `$openname`) fails a test instead of shipping. |
+
+`\uXXXX` decodes a BMP code point. Use it for characters that must not be
+written literally into a fixture — a leading U+FEFF byte-order mark above
+all, which is invisible in an editor and easy to destroy. Note the Go
+runner sees U+FEFF as its UTF-8 encoding (`EF BB BF`) and the TS runner as
+a single UTF-16 code unit; the plugin handles both, so the same row covers
+both runtimes.
 
 `expected` and `opts` are **not** escape-decoded — they are raw JSON, so
 JSON's own escape rules apply.

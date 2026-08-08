@@ -1,4 +1,4 @@
-# name	input	expected	opts
+# name	input	expected	opts	msg
 # Entity references: predefined (amp lt gt quot apos), numeric (decimal and
 # hex), unknown (passed through), and user-supplied custom entities.
 
@@ -20,3 +20,13 @@ unknown-rejected	<a>&unknown;</a>	ERROR:undeclared_entity
 unknown-passthrough-lenient	<a>&unknown;</a>	{"name":"a","localName":"a","attributes":{},"children":["&unknown;"]}	{"strictEntities":false}
 custom-entity	<a>&copy; 2025&nbsp;all rights</a>	{"name":"a","localName":"a","attributes":{},"children":["© 2025\u00a0all rights"]}	{"customEntities":{"nbsp":"\u00a0","copy":"©"}}
 entities-disabled	<a>&amp;</a>	{"name":"a","localName":"a","attributes":{},"children":["&amp;"]}	{"entities":false}
+
+# XML 1.0 [66]: CharRef ::= '&#' [0-9]+ ';' | '&#x' [0-9a-fA-F]+ ';'
+# The hex marker is lowercase-only. `&#X26;` is neither a character
+# reference nor an entity reference (`X26` follows `#`, so it is not a
+# Name), so it is not well-formed. The hex DIGITS may be either case.
+num-hex-lower-x-ok	<a>&#xAB;</a>	{"name":"a","localName":"a","attributes":{},"children":["\u00ab"]}
+num-hex-lower-x-lower-digits-ok	<a>&#xab;</a>	{"name":"a","localName":"a","attributes":{},"children":["\u00ab"]}
+num-hex-upper-X-rejected	<a>&#X26;</a>	ERROR:bad_entity_ref
+num-hex-upper-X-in-attr-rejected	<a v="&#X41;"/>	ERROR:bad_entity_ref
+num-hex-upper-X-rejected-lenient	<a>&#X26;</a>	ERROR:bad_entity_ref	{"strictEntities":false}

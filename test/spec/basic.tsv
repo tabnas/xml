@@ -1,12 +1,16 @@
-# name	input	expected	opts
+# name	input	expected	opts	msg
 # -----------------------------------------------------------------------------
 # Each row is one XML parse test.
 #   name     - unique test identifier
 #   input    - XML source. Escapes: \n (LF) \r (CR) \t (TAB) \\ (backslash)
+#              \uXXXX (BMP code point, for characters that must not be
+#              written literally into the fixture, e.g. a leading BOM)
 #   expected - JSON encoding of the parsed result, OR the literal token
 #              "ERROR" (optionally followed by ":code") to assert a parse
 #              error. The JSON is parsed as-is (standard JSON escapes).
 #   opts     - optional JSON object of plugin options; empty for defaults.
+#   msg      - optional substring the rendered error message must contain
+#              (only meaningful alongside an ERROR expectation).
 # -----------------------------------------------------------------------------
 
 empty-element	<a></a>	{"name":"a","localName":"a","attributes":{},"children":[]}

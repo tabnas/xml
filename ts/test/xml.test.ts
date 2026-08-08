@@ -14,11 +14,13 @@ import { Xml, decodeBOM } from '../dist/xml'
 //
 // Test cases are defined in tab-separated value files under test/spec/*.tsv.
 // Each non-comment row is:
-//   name<TAB>input<TAB>expected<TAB>opts
-// - `input` uses the escape set \n \r \t \\
+//   name<TAB>input<TAB>expected<TAB>opts<TAB>msg
+// - `input` uses the escape set \n \r \t \\ \uXXXX
 // - `expected` is raw JSON (standard JSON escapes apply) or the literal
 //   token ERROR / ERROR:code for expected parse failures.
 // - `opts` is optional JSON for plugin options.
+// - `msg` is an optional substring the rendered error message must
+//   contain (only meaningful with an ERROR expectation).
 // The same files drive the Go test suite in go/xml_test.go.
 // ---------------------------------------------------------------------------
 
@@ -33,6 +35,7 @@ type SpecRow = {
   input: string
   expected: string
   opts: string
+  msg: string
 }
 
 function loadSpec(file: string): SpecRow[] {
@@ -54,6 +57,7 @@ function loadSpec(file: string): SpecRow[] {
       input: unescapeInput(cols[1]),
       expected: cols[2],
       opts: cols[3] ?? '',
+      msg: cols[4] ?? '',
     })
   }
   return rows
@@ -61,7 +65,9 @@ function loadSpec(file: string): SpecRow[] {
 
 // Decode the escape sequences used in the spec `input` column. Keeps
 // the behaviour identical to the Go loader so the two language test
-// suites exercise the exact same XML text.
+// suites exercise the exact same XML text. `\uXXXX` covers characters
+// that must not be written literally into a fixture — a leading U+FEFF
+// byte-order mark above all.
 function unescapeInput(s: string): string {
   if (!s.includes('\\')) return s
   let out = ''
@@ -73,10 +79,22 @@ function unescapeInput(s: string): string {
       if (n === 'r') { out += '\r'; i++; continue }
       if (n === 't') { out += '\t'; i++; continue }
       if (n === '\\') { out += '\\'; i++; continue }
+      if (n === 'u' && i + 5 < s.length && /^[0-9a-fA-F]{4}$/.test(s.substring(i + 2, i + 6))) {
+        out += String.fromCharCode(parseInt(s.substring(i + 2, i + 6), 16))
+        i += 5
+        continue
+      }
     }
     out += c
   }
   return out
+}
+
+// The engine writes SGR colour sequences into rendered error messages,
+// so the `msg` spec column can stay plain text.
+function stripANSI(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/\x1b\[[0-9;]*m/g, '')
 }
 
 function runSpec(file: string) {
@@ -93,11 +111,19 @@ function runSpec(file: string) {
           const code = row.expected.slice(5).replace(/^:/, '')
           assert.throws(
             () => jx.parse(row.input),
-            (err: Error) =>
-              code === '' || err.message.includes(code) ||
-              // Jsonic wraps codes as `jsonic/<code>`; accept that form too.
-              err.message.includes('/' + code),
-            `${row.file}:${row.line}: expected error ${row.expected}`,
+            (err: Error) => {
+              const ok = code === '' || err.message.includes(code) ||
+                // Jsonic wraps codes as `jsonic/<code>`; accept that form too.
+                err.message.includes('/' + code)
+              // The optional `msg` column pins the rendered message, so
+              // a template that stops interpolating (leaving a literal
+              // placeholder behind) fails here rather than silently
+              // shipping.
+              return ok &&
+                ('' === row.msg || stripANSI(err.message).includes(row.msg))
+            },
+            `${row.file}:${row.line}: expected error ${row.expected}` +
+            ('' === row.msg ? '' : ` with message containing "${row.msg}"`),
           )
           return
         }
@@ -222,6 +248,32 @@ describe('xml-embedded-in-jsonic', () => {
 })
 
 
+describe('decodeBOM', () => {
+  // Regression: decodeBOM built the UTF-16 string with
+  // `String.fromCharCode(...units)`, which overflows the call stack
+  // (RangeError) once the document has more than a few tens of
+  // thousands of code units — a crash rather than a parse. The W3C
+  // suite's japanese/pr-xml-utf-16.xml is such a document.
+  for (const [label, big] of [['utf-16be', true], ['utf-16le', false]] as
+    [string, boolean][]) {
+    test(`large ${label} document decodes without overflowing`, () => {
+      const text = '<doc>' + 'あ'.repeat(200000) + '</doc>'
+      const bytes: number[] = big ? [0xfe, 0xff] : [0xff, 0xfe]
+      for (let i = 0; i < text.length; i++) {
+        const u = text.charCodeAt(i)
+        if (big) bytes.push(u >> 8, u & 0xff)
+        else bytes.push(u & 0xff, u >> 8)
+      }
+      const decoded = decodeBOM(Uint8Array.from(bytes))
+      assert.equal(decoded, text)
+      const el = new Tabnas().use(jsonic).use(Xml).parse(decoded) as any
+      assert.equal(el.name, 'doc')
+      assert.equal(el.children[0].length, 200000)
+    })
+  }
+})
+
+
 // ---------------------------------------------------------------------------
 // W3C XML Conformance Test Suite (xmltest subset)
 //
@@ -229,16 +281,18 @@ describe('xml-embedded-in-jsonic', () => {
 // `scripts/fetch-xml-suite.sh`. Skipped otherwise. Mirrors the Go test
 // in go/xmlconf_test.go: counts valid/sa documents that parse and
 // not-wf/sa documents that are correctly rejected, requiring each
-// count to stay above a regression floor. Current parser numbers are
-// ~116/120 valid and ~39/186 not-wf rejected.
+// count to stay above a regression floor. Measured numbers are
+// 120/120 valid and 73/186 not-wf rejected.
 // ---------------------------------------------------------------------------
 
 const xmlconfRoot = join(__dirname, '..', '..', 'test', 'xmlconf')
 const xmlconfAvailable = existsSync(join(xmlconfRoot, 'xmltest'))
 
-// Regression guards; raise once parser coverage improves.
-const VALID_SA_PASS_FLOOR = 118
-const NOT_WF_SA_REJECT_FLOOR = 30
+// Regression guards, set to the measured counts. Raise them when
+// conformance genuinely improves; never lower one to make a
+// regression pass.
+const VALID_SA_PASS_FLOOR = 120
+const NOT_WF_SA_REJECT_FLOOR = 73
 
 function xmlconfFiles(dir: string): string[] {
   if (!existsSync(dir)) return []
