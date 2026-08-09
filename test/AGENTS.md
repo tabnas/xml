@@ -41,9 +41,16 @@ both runtimes without touching either runner. (The Go side used to name each
 file by hand, and that list had gone stale — `dtd-attlist`, `dtd-entities`
 and `xmlspace-lang` were running in TypeScript only.)
 
-`test/xmlconf/` is separate: the W3C conformance suite, fetched on demand by
-`scripts/fetch-xml-suite.sh` and checked against pass-rate floors rather than
-exact output. Behavioural cases belong here in `spec/`.
+`test/xmlconf/` is separate: the W3C XML Conformance Test Suite. It is
+**never committed** (W3C-owned, not redistributed) — `scripts/fetch-xml-suite.sh`
+downloads the pinned `xmlts20130923.tar.gz`, verifies its SHA-256, and
+extracts it into the gitignored `test/xmlconf/`. The fetch runs automatically
+before the tests (`pretest` in `ts/package.json`, `TestMain` in
+`go/xmlconf_test.go`) and the tests **fail loudly** if the corpus is absent.
+They never skip. See the conformance section of the root `AGENTS.md` for the
+two layers (narrow floors, catalogue-wide sweep) and the measured numbers.
+
+Behavioural cases still belong here in `spec/`.
 
 ## Rules
 

@@ -277,16 +277,34 @@ describe('decodeBOM', () => {
 // ---------------------------------------------------------------------------
 // W3C XML Conformance Test Suite (xmltest subset)
 //
-// Exercised when the suite has been fetched to `test/xmlconf/` via
-// `scripts/fetch-xml-suite.sh`. Skipped otherwise. Mirrors the Go test
-// in go/xmlconf_test.go: counts valid/sa documents that parse and
-// not-wf/sa documents that are correctly rejected, requiring each
-// count to stay above a regression floor. Measured numbers are
+// The narrow guard: valid/sa documents that parse and not-wf/sa documents
+// that are correctly rejected, each required to stay above a regression
+// floor. Mirrors the Go test in go/xmlconf_test.go. Measured numbers are
 // 120/120 valid and 74/186 not-wf rejected.
+//
+// The suite is fetched by `scripts/fetch-xml-suite.sh`, which the `pretest`
+// npm script runs before every `npm test`. This block used to carry
+// `{ skip: !xmlconfAvailable }`, so when the corpus was absent — which is
+// what CI always did, since nothing fetched it — it reported green while
+// measuring nothing. A missing corpus is now a hard failure.
+//
+// `xmlconf.test.ts` runs the whole catalogue (2586 documents, not the 306
+// here) and additionally compares valid documents against the catalogue's
+// canonical OUTPUT. These floors stay because they are a tighter guard on
+// the sub-corpus they cover.
 // ---------------------------------------------------------------------------
 
 const xmlconfRoot = join(__dirname, '..', '..', 'test', 'xmlconf')
-const xmlconfAvailable = existsSync(join(xmlconfRoot, 'xmltest'))
+
+if (!existsSync(join(xmlconfRoot, 'xmltest'))) {
+  throw new Error(
+    'W3C XML Conformance Test Suite is MISSING.\n' +
+      `  expected: ${join(xmlconfRoot, 'xmltest')}\n` +
+      '  fix: run scripts/fetch-xml-suite.sh (`npm test` does this for you\n' +
+      '       via the `pretest` script; it needs network access to w3.org)\n' +
+      '  these tests do NOT skip.',
+  )
+}
 
 // Regression guards, set to the measured counts. Raise them when
 // conformance genuinely improves; never lower one to make a
@@ -302,7 +320,7 @@ function xmlconfFiles(dir: string): string[] {
     .map((n) => join(dir, n))
 }
 
-describe('w3c-xml-conformance', { skip: !xmlconfAvailable }, () => {
+describe('w3c-xml-conformance', () => {
   test('valid/sa documents parse', () => {
     const files = xmlconfFiles(join(xmlconfRoot, 'xmltest', 'valid', 'sa'))
     assert.ok(files.length > 0, 'no valid/sa files')

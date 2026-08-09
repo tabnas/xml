@@ -114,21 +114,95 @@ function importsToRequire(code) {
     )
 }
 
-// Rewrite `<expr>  // => <expected>` lines into __eq(expr, expected) calls.
+// Rewrite `<expr>  // => <expected>` into __eq(expr, expected) calls.
+//
+// Two forms are recognised:
+//
+//   trailing:  expr   // => expected
+//
+//   block:     expr
+//              // => {
+//              //   ...expected, continued over comment lines
+//              // }
+//
+// The block form is how every multi-line expected value in these docs is
+// written (the root README example among them). It used to be dropped
+// entirely: the arrow line's code part is empty, so no assertion was built.
 const ARROW = /\/\/\s*=>(.*)$/
+// ARROW is applied line by line, where `$` means end of line. The block-level
+// "does this example claim an expected value?" probe ran ARROW.test() against
+// the whole joined block, where `$` means end of the WHOLE STRING — so a block
+// whose `// =>` was not on its final line was silently dropped and never
+// tested at all. Probe with an anchorless pattern instead.
+const ARROW_ANY = /\/\/\s*=>/
+const COMMENT_LINE = /^\s*\/\/(.*)$/
+
 function rewriteAssertions(code) {
   let count = 0
-  const out = code.split('\n').map((line) => {
+  const lines = code.split('\n')
+  const out = []
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+
+    // -- block form: a pure-comment line opening with `=>` -------------------
+    const cm = line.match(COMMENT_LINE)
+    if (cm) {
+      const am = cm[1].match(/^\s*=>(.*)$/)
+      if (am) {
+        // The expected value is this line plus any immediately following
+        // pure-comment continuation lines (stopping at the next `=>`).
+        let expected = am[1]
+        let j = i + 1
+        while (j < lines.length) {
+          const nm = lines[j].match(COMMENT_LINE)
+          if (!nm || /^\s*=>/.test(nm[1])) break
+          expected += '\n' + nm[1]
+          j++
+        }
+        // The expression is the last non-blank line already emitted, provided
+        // it looks like a bare expression rather than a statement.
+        let k = out.length - 1
+        while (0 <= k && out[k].trim() === '') k--
+        const expr = 0 <= k ? out[k] : ''
+        const bare =
+          expr.trim() !== '' &&
+          !COMMENT_LINE.test(expr) &&
+          !/[;{}(,]\s*$/.test(expr) &&
+          !/^\s*(const|let|var|function|class|return|if|for|while|import|export)\b/.test(
+            expr,
+          )
+        if (expected.trim() !== '' && bare) {
+          const indent = expr.match(/^\s*/)[0]
+          out[k] = `${indent}__eq((${expr.trim()}), (${expected.trim()}));`
+          count++
+          i = j - 1
+          continue
+        }
+      }
+      out.push(line)
+      continue
+    }
+
+    // -- trailing form ------------------------------------------------------
     const m = line.match(ARROW)
-    if (!m) return line
+    if (!m) {
+      out.push(line)
+      continue
+    }
     const expected = m[1].trim()
-    if (expected === '') return line // `// =>` with no value: leave as comment
+    if (expected === '') {
+      out.push(line) // `// =>` with no value: leave as comment
+      continue
+    }
     const codePart = line.slice(0, m.index).replace(/[;\s]+$/, '')
-    if (codePart.trim() === '') return line
+    if (codePart.trim() === '') {
+      out.push(line)
+      continue
+    }
     const indent = line.match(/^\s*/)[0]
     count++
-    return `${indent}__eq((${codePart}), (${expected}));`
-  })
+    out.push(`${indent}__eq((${codePart}), (${expected}));`)
+  }
   return { code: out.join('\n'), count }
 }
 
@@ -164,6 +238,11 @@ function makeRequire() {
 describe('doc-examples', () => {
   const files = collectMarkdown()
   let testable = 0
+  // Blocks that advertise an expected value with `// =>` but from which no
+  // assertion could be built. Those used to vanish silently, so a documented
+  // example could be wrong forever without any test noticing. They are now
+  // reported as a failure.
+  const unasserted = []
 
   for (const file of files) {
     const rel = path.relative(REPO, file)
@@ -171,11 +250,14 @@ describe('doc-examples', () => {
     blocks.forEach((b, bi) => {
       if (b.ignore) return
       const joined = b.code.join('\n')
-      if (!ARROW.test(joined)) return // no assertions -> skip
+      if (!ARROW_ANY.test(joined)) return // genuinely illustrative: no `// =>`
       const { code, count } = rewriteAssertions(importsToRequire(joined))
-      if (count === 0) return
-      testable++
       const label = `${rel} block #${bi + 1} (line ${b.startLine})`
+      if (count === 0) {
+        unasserted.push(label)
+        return
+      }
+      testable++
       it(label, () => {
         const isAsync = /\bawait\b/.test(code)
         const body = isAsync ? `return (async () => {\n${code}\n})()` : code
@@ -185,8 +267,24 @@ describe('doc-examples', () => {
     })
   }
 
-  it('found at least one tested example (sanity)', () => {
-    // Not a hard failure if a repo has no `// =>` examples yet.
-    assert.ok(testable >= 0, `tested ${testable} doc example block(s)`)
+  it('at least one documented example is actually asserted', () => {
+    // Was `assert.ok(testable >= 0, ...)` — a count is always >= 0, so that
+    // assertion could not fail. If the extractor ever stopped finding any
+    // example, the suite stayed green while testing nothing.
+    assert.ok(
+      0 < testable,
+      `no documented example was asserted (found ${files.length} markdown file(s)). ` +
+        'Either the docs lost their `// =>` examples or the extractor regressed.',
+    )
+  })
+
+  it('every `// =>` example yields a real assertion', () => {
+    assert.deepStrictEqual(
+      unasserted,
+      [],
+      'these documented blocks contain `// =>` but produced no assertion, ' +
+        'so their stated output is never checked:\n  ' +
+        unasserted.join('\n  '),
+    )
   })
 })
