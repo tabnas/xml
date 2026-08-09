@@ -1,10 +1,11 @@
 /* Copyright (c) 2021-2026 Richard Rodger and other contributors, MIT License */
 
 // Composition test: the XML grammar plugin layered with the official
-// @tabnas/debug plugin. @tabnas/debug is a devDependency, but this resolves
-// it dynamically and SKIPS when it is absent so the suite stays runnable
-// outside the package. The `compose-debug` CI job can point
-// TABNAS_DEBUG_PATH at a sibling checkout's built plugin.
+// @tabnas/debug plugin. @tabnas/debug is a declared devDependency and CI
+// builds it as a sibling, so it is always meant to be present; this resolves
+// it dynamically only so a TABNAS_DEBUG_PATH override can point at a sibling
+// checkout's built plugin. If it cannot be resolved the test FAILS — it used
+// to skip, which turned a broken dependency graph into a green tick.
 
 import { describe, test } from 'node:test'
 import assert from 'node:assert'
@@ -33,12 +34,21 @@ function loadDebug(): any {
 }
 
 const Debug = loadDebug()
-const skip = Debug
-  ? false
-  : '@tabnas/debug not available (set TABNAS_DEBUG_PATH)'
+
+if (!Debug) {
+  throw new Error(
+    '@tabnas/debug could not be resolved, so the xml+debug composition test ' +
+      'cannot run.\n' +
+      '  it is a devDependency of ts/package.json and must be installed.\n' +
+      '  fix: build the sibling checkout (../../debug/ts) and re-link, or set ' +
+      'TABNAS_DEBUG_PATH to a built copy.\n' +
+      '  this test does NOT skip: a test that quietly does not run is the ' +
+      'same defect class as a swallowed failure.',
+  )
+}
 
 describe('compose: xml + @tabnas/debug', () => {
-  test('parses normally with the debug plugin installed', { skip }, () => {
+  test('parses normally with the debug plugin installed', () => {
     const tn = new Tabnas().use(jsonic).use(Xml)
     tn.use(Debug, { print: false, trace: false })
     assert.deepEqual(JSON.parse(JSON.stringify(tn.parse('<a>hello</a>'))), {
@@ -49,7 +59,7 @@ describe('compose: xml + @tabnas/debug', () => {
     })
   })
 
-  test('debug.model() returns the structured xml grammar', { skip }, () => {
+  test('debug.model() returns the structured xml grammar', () => {
     const tn = new Tabnas().use(jsonic).use(Xml)
     tn.use(Debug, { print: false, trace: false })
     const m = tn.debug.model()
