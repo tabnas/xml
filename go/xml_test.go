@@ -1,18 +1,15 @@
 package tabnasxml
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 
 	jsonic "github.com/tabnas/jsonic/go"
+	support "github.com/tabnas/support/go"
 )
 
 // ansiRE matches the SGR colour sequences the engine writes into
@@ -35,75 +32,79 @@ func asMap(v any) map[string]any {
 }
 
 // specEntry represents one row of a TSV spec file.
-type specEntry struct {
-	File     string
-	Line     int
-	Name     string
-	Input    string // Escape-decoded XML source.
-	Expected string // Raw cell: JSON text, or "ERROR" / "ERROR:code".
-	Opts     string // Raw JSON (may be empty).
-	Msg      string // Substring the error message must contain (may be empty).
-}
-
-// specDir returns the absolute path to the shared TSV spec directory.
-func specDir() string {
-	return filepath.Join("..", "test", "spec")
-}
-
-// loadSpec reads a TSV spec file into a slice of specEntry. Comment and
-// blank lines are skipped. Escapes in the `input` column are decoded
-// via unescapeInput; the `expected` and `opts` columns are left raw so
-// JSON's own escape rules are honoured by the downstream JSON parser.
-func loadSpec(t *testing.T, path string) []specEntry {
-	t.Helper()
-	f, err := os.Open(path)
+// TestSpec runs every fixture in the spec directory. FindSpecDir walks up
+// from the package directory, and Dir discovers the files by listing, so
+// adding a .tsv runs it in both runtimes without touching either runner.
+//
+// A row is `# name<TAB>input<TAB>expected<TAB>opts<TAB>msg`. The header
+// line begins with #, which is why the columns are read by NAME and why
+// the first one is called "# name".
+func TestSpec(t *testing.T) {
+	dir, err := support.FindSpecDir("")
 	if err != nil {
-		t.Fatalf("open %s: %v", path, err)
+		t.Fatal(err)
 	}
-	defer f.Close()
 
-	var out []specEntry
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1<<20), 1<<20)
-	lineNo := 0
-	for scanner.Scan() {
-		lineNo++
-		line := scanner.Text()
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		cols := strings.Split(line, "\t")
-		if len(cols) < 3 {
-			t.Fatalf("%s:%d: expected at least 3 tab-separated columns, got %d", path, lineNo, len(cols))
-		}
-		entry := specEntry{
-			File:     filepath.Base(path),
-			Line:     lineNo,
-			Name:     cols[0],
-			Input:    unescapeInput(cols[1]),
-			Expected: cols[2],
-		}
-		if len(cols) >= 4 {
-			entry.Opts = cols[3]
-		}
-		if len(cols) >= 5 {
-			entry.Msg = cols[4]
-		}
-		out = append(out, entry)
-	}
-	if err := scanner.Err(); err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	return out
+	support.Runner{
+		// The runner's own decoding of the input column is bypassed — see
+		// specUnescape below — so the raw cell is read and decoded here.
+		ParseRow: func(_ string, row *support.Row) (any, error) {
+			input := specUnescape(row.Named("input"))
+
+			opts := map[string]any{}
+			if raw := row.Named("opts"); "" != strings.TrimSpace(raw) {
+				if err := json.Unmarshal([]byte(raw), &opts); err != nil {
+					return nil, err
+				}
+			}
+
+			j := jsonic.Make()
+			if err := j.UseDefaults(Xml, Defaults, opts); err != nil {
+				return nil, err
+			}
+			return j.Parse(input)
+		},
+
+		// Two things the default code comparison does not do. The engine
+		// renders a code as jsonic/<code>, so both spellings are accepted;
+		// and the optional msg column pins the rendered message, so a
+		// template that stops interpolating — leaving a literal
+		// placeholder behind — fails here rather than silently shipping.
+		MatchError: func(err error, want string, row *support.Row) bool {
+			message := err.Error()
+			if !strings.Contains(message, want) {
+				return false
+			}
+			msg := row.Named("msg")
+			return "" == msg || strings.Contains(stripANSI(message), msg)
+		},
+
+		// Flatten through JSON so []any versus a concrete slice type, and
+		// Go's numeric types, compare against the fixture's decoded shape.
+		Normalize: jsonFlatten,
+
+		InputName:    "input",
+		ExpectedName: "expected",
+		CaseName: func(row *support.Row, _ string) string {
+			return fmt.Sprintf("row %d: %s", row.Line, row.Named("# name"))
+		},
+	}.Dir(t, dir)
 }
 
-// unescapeInput decodes the escape sequences used in the `input`
-// column of the TSV spec: \n (LF), \r (CR), \t (TAB), \\ (backslash),
-// and \uXXXX (a BMP code point, for characters that must not be written
-// literally into the fixture — a leading U+FEFF byte-order mark above
-// all). Any other `\x` sequence is left intact so XML escapes like `\d`
-// are not accidentally rewritten.
-func unescapeInput(s string) string {
+// specUnescape is the one thing this repo does not take from the support
+// module: its own escape codec, because xml's fixtures need a sixth
+// escape.
+//
+// \uXXXX names a character that must not be written literally into a
+// fixture — a leading U+FEFF byte-order mark above all, which is invisible
+// in a diff. The shared codec passes \u through on purpose: an XML
+// fixture, like a JSON one, has to be able to carry a literal \u0041 as
+// source text. So it is decoded here, in one pass over the RAW cell; after
+// the shared codec an escaped backslash followed by uFEFF is
+// indistinguishable from a plain \uFEFF.
+//
+// Kept byte-identical to unescapeInput in ts/test/xml-spec.test.ts.
+func specUnescape(s string) string {
 	if !strings.Contains(s, `\`) {
 		return s
 	}
@@ -144,281 +145,20 @@ func unescapeInput(s string) string {
 	return b.String()
 }
 
-// parseOpts decodes the optional options JSON into a map suitable for
-// jsonic.UseDefaults. Empty strings produce an empty map.
-func parseOpts(t *testing.T, entry specEntry) map[string]any {
-	t.Helper()
-	if strings.TrimSpace(entry.Opts) == "" {
-		return map[string]any{}
+// jsonFlatten renders a value as JSON and reads it back as plain
+// map/slice/float64/string/bool/nil. A value that will not marshal is
+// returned as it is: the comparison then fails and prints it, which says
+// more than a panic here would.
+func jsonFlatten(v any) any {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return v
 	}
-	var out map[string]any
-	if err := json.Unmarshal([]byte(entry.Opts), &out); err != nil {
-		t.Fatalf("%s:%d: parse opts %q: %v", entry.File, entry.Line, entry.Opts, err)
+	var out any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return v
 	}
 	return out
-}
-
-// parseExpected decodes the expected cell: either a JSON document or
-// an `ERROR` / `ERROR:code` marker.
-func parseExpected(t *testing.T, entry specEntry) (wantErr bool, errCode string, wantJSON any) {
-	t.Helper()
-	raw := entry.Expected
-	if strings.HasPrefix(raw, "ERROR") {
-		rest := strings.TrimPrefix(raw, "ERROR")
-		rest = strings.TrimPrefix(rest, ":")
-		return true, rest, nil
-	}
-	if err := json.Unmarshal([]byte(raw), &wantJSON); err != nil {
-		t.Fatalf("%s:%d: parse expected JSON %q: %v", entry.File, entry.Line, raw, err)
-	}
-	return false, "", wantJSON
-}
-
-// runSpecFile is the workhorse: it loads one spec file and runs each
-// row as its own sub-test.
-func runSpecFile(t *testing.T, path string) {
-	entries := loadSpec(t, path)
-	if len(entries) == 0 {
-		t.Fatalf("%s: no spec entries loaded", path)
-	}
-	for _, entry := range entries {
-		entry := entry
-		t.Run(entry.Name, func(t *testing.T) {
-			opts := parseOpts(t, entry)
-			wantErr, errCode, wantVal := parseExpected(t, entry)
-
-			j := jsonic.Make()
-			if err := j.UseDefaults(Xml, Defaults, opts); err != nil {
-				t.Fatalf("plugin init: %v", err)
-			}
-			got, err := j.Parse(entry.Input)
-
-			if wantErr {
-				if err == nil {
-					t.Fatalf("expected parse error, got result %v", got)
-				}
-				if errCode != "" && !strings.Contains(err.Error(), errCode) {
-					t.Fatalf("expected error code %q, got %q", errCode, err.Error())
-				}
-				// The optional 5th column pins the rendered message, so
-				// a template that stops interpolating (leaving a literal
-				// placeholder behind) fails here rather than silently
-				// shipping.
-				if entry.Msg != "" && !strings.Contains(stripANSI(err.Error()), entry.Msg) {
-					t.Fatalf("expected error message to contain %q, got %q",
-						entry.Msg, stripANSI(err.Error()))
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected parse error: %v", err)
-			}
-
-			// Round-trip the got value through JSON for type normalisation
-			// so `[]any` vs concrete slice types compare cleanly against
-			// values decoded from the spec via json.Unmarshal.
-			gotJSON, err := json.Marshal(got)
-			if err != nil {
-				t.Fatalf("marshal got: %v", err)
-			}
-			var gotVal any
-			if err := json.Unmarshal(gotJSON, &gotVal); err != nil {
-				t.Fatalf("unmarshal got: %v", err)
-			}
-			if !reflect.DeepEqual(gotVal, wantVal) {
-				wantPretty, _ := json.Marshal(wantVal)
-				t.Fatalf("\nwant: %s\ngot : %s", wantPretty, gotJSON)
-			}
-		})
-	}
-}
-
-// TestSpec auto-discovers every fixture under test/spec, exactly as the
-// TypeScript runner does. The hand-written list this replaces had gone stale:
-// dtd-attlist.tsv, dtd-entities.tsv and xmlspace-lang.tsv were run by
-// TypeScript alone, so nothing held the Go port to them.
-func TestSpec(t *testing.T) {
-	files, err := filepath.Glob(filepath.Join(specDir(), "*.tsv"))
-	if err != nil {
-		t.Fatalf("glob spec dir: %v", err)
-	}
-	if len(files) == 0 {
-		t.Fatalf("no spec files under %s", specDir())
-	}
-	for _, path := range files {
-		t.Run(filepath.Base(path), func(t *testing.T) { runSpecFile(t, path) })
-	}
-}
-
-// --- XML literals embedded in Jsonic source --------------------------------
-//
-// With `embed: true` the plugin extends Jsonic's own grammar so a literal
-// XML element can appear anywhere a Jsonic value is expected. These tests
-// exercise that integration: plain Jsonic documents still parse, a lone
-// XML literal parses as an element, XML literals inside maps and lists
-// parse in place, text with JSON-syntax characters (commas, colons) is
-// preserved, and namespaces resolve across the embedded tree.
-
-func embedParser(t *testing.T) *jsonic.Jsonic {
-	t.Helper()
-	j := jsonic.Make()
-	if err := j.UseDefaults(Xml, Defaults, map[string]any{"embed": true}); err != nil {
-		t.Fatalf("UseDefaults: %v", err)
-	}
-	return j
-}
-
-func TestEmbedPlainJsonicStillWorks(t *testing.T) {
-	j := embedParser(t)
-	got, err := j.Parse(`{a:1, b:"two"}`)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	m := asMap(got)
-	if m == nil {
-		t.Fatalf("expected map, got %T", got)
-	}
-	if m["a"] != float64(1) || m["b"] != "two" {
-		t.Fatalf("plain jsonic: got %v", m)
-	}
-}
-
-func TestEmbedXmlAsTopLevelValue(t *testing.T) {
-	j := embedParser(t)
-	got, err := j.Parse(`<a>hello</a>`)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	el, ok := got.(map[string]any)
-	if !ok {
-		t.Fatalf("expected map, got %T", got)
-	}
-	if el["name"] != "a" {
-		t.Fatalf("name: got %v", el["name"])
-	}
-	children, _ := el["children"].([]any)
-	if len(children) != 1 || children[0] != "hello" {
-		t.Fatalf("children: got %v", children)
-	}
-}
-
-func TestEmbedXmlInsideJsonicMap(t *testing.T) {
-	j := embedParser(t)
-	src := `{
-  title: "order-42",
-  payload: <order id="42">
-    <item qty="2">Widget</item>
-    <item qty="1">Gadget</item>
-  </order>,
-}`
-	got, err := j.Parse(src)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	m := asMap(got)
-	if m["title"] != "order-42" {
-		t.Fatalf("title: got %v", m["title"])
-	}
-	payload := m["payload"].(map[string]any)
-	if payload["name"] != "order" {
-		t.Fatalf("payload.name: got %v", payload["name"])
-	}
-	if a, _ := payload["attributes"].(map[string]any); a["id"] != "42" {
-		t.Fatalf("payload.attributes.id: got %v", a["id"])
-	}
-	children, _ := payload["children"].([]any)
-	var items []map[string]any
-	for _, c := range children {
-		if cm, ok := c.(map[string]any); ok && cm["name"] == "item" {
-			items = append(items, cm)
-		}
-	}
-	if len(items) != 2 {
-		t.Fatalf("expected 2 item elements, got %d", len(items))
-	}
-	if a, _ := items[0]["attributes"].(map[string]any); a["qty"] != "2" {
-		t.Fatalf("item[0].qty: got %v", a["qty"])
-	}
-	if ch, _ := items[0]["children"].([]any); len(ch) != 1 || ch[0] != "Widget" {
-		t.Fatalf("item[0].children: got %v", ch)
-	}
-	if a, _ := items[1]["attributes"].(map[string]any); a["qty"] != "1" {
-		t.Fatalf("item[1].qty: got %v", a["qty"])
-	}
-}
-
-func TestEmbedXmlTextPreservesJsonSyntaxChars(t *testing.T) {
-	j := embedParser(t)
-	got, err := j.Parse(`<a>Hello, World!</a>`)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	children, _ := got.(map[string]any)["children"].([]any)
-	if len(children) != 1 || children[0] != "Hello, World!" {
-		t.Fatalf("children: got %v", children)
-	}
-
-	got2, err := j.Parse(`<a>key: value</a>`)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	children2, _ := got2.(map[string]any)["children"].([]any)
-	if len(children2) != 1 || children2[0] != "key: value" {
-		t.Fatalf("children2: got %v", children2)
-	}
-}
-
-func TestEmbedMultipleXmlInsideJsonicList(t *testing.T) {
-	j := embedParser(t)
-	got, err := j.Parse(`[<a/>, <b>x</b>, <c x="1"/>]`)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	arr, ok := got.([]any)
-	if !ok || len(arr) != 3 {
-		t.Fatalf("expected 3-element list, got %v", got)
-	}
-	if arr[0].(map[string]any)["name"] != "a" {
-		t.Fatalf("arr[0]: %v", arr[0])
-	}
-	if ch, _ := arr[1].(map[string]any)["children"].([]any); len(ch) != 1 || ch[0] != "x" {
-		t.Fatalf("arr[1].children: %v", ch)
-	}
-	if a, _ := arr[2].(map[string]any)["attributes"].(map[string]any); a["x"] != "1" {
-		t.Fatalf("arr[2].attributes.x: %v", a)
-	}
-}
-
-func TestEmbedXmlNamespacesResolve(t *testing.T) {
-	j := embedParser(t)
-	got, err := j.Parse(`{doc: <root xmlns="http://e.example"><child/></root>}`)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	doc := asMap(got)["doc"].(map[string]any)
-	if doc["namespace"] != "http://e.example" {
-		t.Fatalf("doc.namespace: %v", doc["namespace"])
-	}
-	children, _ := doc["children"].([]any)
-	if len(children) != 1 {
-		t.Fatalf("expected 1 child, got %d", len(children))
-	}
-	child := children[0].(map[string]any)
-	if child["namespace"] != "http://e.example" {
-		t.Fatalf("child.namespace: %v", child["namespace"])
-	}
-}
-
-// TestSpecDirExists is a sanity check that the shared test/spec folder is
-// reachable from the Go test working directory.
-func TestSpecDirExists(t *testing.T) {
-	info, err := os.Stat(specDir())
-	if err != nil {
-		t.Fatalf("spec dir: %v", err)
-	}
-	if !info.IsDir() {
-		t.Fatalf("%s is not a directory", specDir())
-	}
 }
 
 // Compile-time assertion that specEntry stringifies meaningfully in
