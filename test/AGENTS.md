@@ -32,14 +32,26 @@ the comparison.
 
 ## Who runs what
 
-- TypeScript: `ts/test/xml.test.ts` — reads `../../test/spec` at runtime
-  from `dist-test/`.
-- Go: `go/xml_test.go` — `TestSpec` globs `../test/spec/*.tsv`.
+- TypeScript: `ts/test/xml-spec.test.ts` — `makeRunner(...).dir(...)`.
+- Go: `go/xml_test.go` — `support.Runner{...}.Dir(t, dir)`.
+
+Both hold only what is specific to xml: the `\uXXXX` escape, the `msg`
+column, and how to build the parser for a row's `opts`. Everything else —
+finding `test/spec`, reading the file, the `ERROR:` contract, the
+comparison, the `<file>:<line>` in a failure message — comes from
+[`@tabnas/support`](https://github.com/tabnas/support) and its Go half, so
+the two loaders cannot drift from each other either.
+
+`\uXXXX` is the exception: the shared codec deliberately passes `\u`
+through, because a fixture has to be able to carry a literal one, so each
+runtime decodes that escape itself over the raw cell — the two
+implementations are kept byte-identical and say so in a comment.
 
 Both discover files by directory listing: adding a `.tsv` here runs it in
 both runtimes without touching either runner. (The Go side used to name each
 file by hand, and that list had gone stale — `dtd-attlist`, `dtd-entities`
-and `xmlspace-lang` were running in TypeScript only.)
+and `xmlspace-lang` were running in TypeScript only.) An empty fixture, and
+a spec directory with no fixtures in it, both **fail**.
 
 `test/xmlconf/` is separate: the W3C XML Conformance Test Suite. It is
 **never committed** (W3C-owned, not redistributed) — `scripts/fetch-xml-suite.sh`
