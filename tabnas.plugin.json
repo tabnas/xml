@@ -1,0 +1,42 @@
+{
+  "$schema": "https://tabnas.dev/schema/plugin.schema.json",
+  "name": "@tabnas/xml",
+  "go": "github.com/tabnas/xml/go",
+  "description": "XML 1.0 parsing for the tabnas engine, with namespaces and entities.",
+  "base": "@tabnas/jsonic",
+  "engine": "@tabnas/parser",
+  "grammar": "xml-grammar.jsonic",
+  "extensions": [
+    ".xml"
+  ],
+  "mediaTypes": [
+    "application/xml",
+    "text/xml"
+  ],
+  "specDir": "test/spec",
+  "errorCodes": [
+    "xml_mismatched_tag",
+    "xml_invalid_tag",
+    "unterminated_comment",
+    "unterminated_cdata",
+    "unterminated_pi",
+    "unterminated_doctype",
+    "comment_double_dash",
+    "cdata_terminator_in_text",
+    "pi_target_invalid",
+    "lt_in_attr_value",
+    "bad_entity_ref",
+    "duplicate_attribute",
+    "invalid_xml_char",
+    "reserved_namespace",
+    "unbound_prefix",
+    "invalid_namespace_uri",
+    "undeclared_entity",
+    "unparsed_entity_ref",
+    "external_entity_in_attr",
+    "text_at_top_level"
+  ],
+  "docs": "https://tabnas.dev/docs/packages",
+  "repository": "https://github.com/tabnas/xml",
+  "versionSource": "ts/package.json"
+}
