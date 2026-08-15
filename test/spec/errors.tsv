@@ -8,6 +8,32 @@ unterminated-comment	<a><!-- unterminated	ERROR
 unterminated-cdata	<a><![CDATA[unterminated	ERROR
 unterminated-pi	<a><?target data	ERROR
 unterminated-tag	<a x="unterminated	ERROR
+# XML 1.0 well-formedness constraints the lexer enforces directly. Each
+# raises its own code rather than a generic rejection, so each is pinned by
+# code -- the code is the contract across runtimes, the message is not.
+#
+# `]]>` is forbidden in CharData (XML 1.0 2.4) but NOT in AttValue, so the
+# input has to place it in element content. A bare `]]>` outside any
+# element fails earlier, and more generally, as text_at_top_level.
+cdata-terminator-in-text	<a>]]></a>	ERROR:cdata_terminator_in_text
+# `--` may not appear inside a comment (XML 1.0 2.5).
+comment-double-dash	<a><!-- x -- y --></a>	ERROR:comment_double_dash
+# An attribute name may not repeat within one element (XML 1.0 3.1).
+duplicate-attribute	<a x="1" x="2"/>	ERROR:duplicate_attribute
+# `<` may not appear literally in an attribute value (XML 1.0 3.1).
+attr-value-literal-lt	<a x="<"/>	ERROR:lt_in_attr_value
+# A processing instruction needs a target Name (XML 1.0 2.6).
+pi-target-empty	<a><??></a>	ERROR:pi_target_invalid
+# Characters outside the Char production are rejected wherever they can
+# appear. One row per call site: the census counts CODES, so it would go
+# green on the first of these while the other four paths stayed untested.
+# U+0001 is written with the \uXXXX escape both runners decode (see
+# bom.tsv) -- a literal control byte in a .tsv does not survive editing.
+control-char-in-text	<a>\u0001</a>	ERROR:invalid_xml_char
+control-char-in-comment	<a><!--\u0001--></a>	ERROR:invalid_xml_char
+control-char-in-cdata	<a><![CDATA[\u0001]]></a>	ERROR:invalid_xml_char
+control-char-in-pi	<a><?t \u0001?></a>	ERROR:invalid_xml_char
+control-char-in-attribute	<a b="\u0001"/>	ERROR:invalid_xml_char
 xmlns-redeclare-xmlns	<a xmlns:xmlns="http://example.com"/>	ERROR:reserved_namespace
 xmlns-xml-wrong-uri	<a xmlns:xml="http://example.com"/>	ERROR:reserved_namespace
 xmlns-default-xml-uri	<a xmlns="http://www.w3.org/XML/1998/namespace"/>	ERROR:reserved_namespace
