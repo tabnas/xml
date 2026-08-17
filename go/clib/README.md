@@ -64,6 +64,10 @@ const c = @cImport(@cInclude("tabnas.h"));
 // c.tabnas_free.
 ```
 
+## Format notes
+
+Input is BOM-decoded (`DecodeBOM`: UTF-8/16/32 BOMs) before parsing, matching the package entry points — the ABI accepts arbitrary byte buffers, so encoded documents must not be fed to the UTF-8 parser raw.
+
 ## Layout
 
 - `core.go` — the behaviour, in plain Go (testable).
