@@ -101,8 +101,8 @@ const grammarText = `
     { p: element c: '@no-root-yet' }
   ]
   rule: xml: close: [
-    { s: '#ZZ' }
-    { s: '#TX' r: xml a: '@doc-text-close' }
+    { s: '#ZZ' g: end }
+    { s: '#TX' r: xml a: '@doc-text-close' g: comma }
   ]
 
   rule: element: open: [
@@ -111,7 +111,7 @@ const grammarText = `
   ]
   rule: element: close: [
     { c: '@element-is-selfclosed' }
-    { s: '#XCL' a: '@element-close' }
+    { s: '#XCL' a: '@element-close' g: close }
   ]
 
   rule: content: open: [
@@ -119,7 +119,7 @@ const grammarText = `
     { p: child }
   ]
   rule: content: close: [
-    { s: '#XCL' b: 1 }
+    { s: '#XCL' b: 1 g: close }
     { r: content }
   ]
 
