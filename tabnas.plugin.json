@@ -14,6 +14,17 @@
     "text/xml"
   ],
   "specDir": "test/spec",
+  "clib": {
+    "dir": "go/clib",
+    "library": "libtabnasxml",
+    "abi": "v1",
+    "errorCodes": [
+      "usage",
+      "grammar",
+      "handle",
+      "internal"
+    ]
+  },
   "errorCodes": [
     "xml_mismatched_tag",
     "xml_invalid_tag",
