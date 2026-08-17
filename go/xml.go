@@ -356,8 +356,8 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 					{P: "element", C: "@no-root-yet"},
 				},
 				Close: []*jsonic.GrammarAltSpec{
-					{S: "#ZZ"},
-					{S: "#TX", R: "xml", A: "@doc-text-close"},
+					{S: "#ZZ", G: "end"},
+					{S: "#TX", R: "xml", A: "@doc-text-close", G: "comma"},
 				},
 			},
 			"element": {
@@ -367,7 +367,7 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 				},
 				Close: []*jsonic.GrammarAltSpec{
 					{C: "@element-is-selfclosed"},
-					{S: "#XCL", A: "@element-close"},
+					{S: "#XCL", A: "@element-close", G: "close"},
 				},
 			},
 			"content": {
@@ -376,7 +376,7 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 					{P: "child"},
 				},
 				Close: []*jsonic.GrammarAltSpec{
-					{S: "#XCL", B: 1},
+					{S: "#XCL", B: 1, G: "close"},
 					{R: "content"},
 				},
 			},

@@ -13,6 +13,15 @@
     "application/xml",
     "text/xml"
   ],
+  "languageId": "xml",
+  "pluginKind": "grammar",
+  "grammarKind": "closure",
+  "lexStream": "clean",
+  "syncGroups": [
+    "end",
+    "comma",
+    "close"
+  ],
   "specDir": "test/spec",
   "errorCodes": [
     "xml_mismatched_tag",
