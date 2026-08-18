@@ -564,10 +564,15 @@ const predefinedEntities: Record<string, string> = {
 // where `dtd` is a per-parse map { name -> raw value } that the
 // matcher pulls from `lex.ctx.u.dtdEntities`.
 function buildEntityDecoder(options: XmlOptions) {
-  const baseEntities = {
-    ...predefinedEntities,
-    ...(options?.customEntities || {}),
-  }
+  // Allocated without a prototype: `ref` comes from the document, so on a
+  // plain literal `baseEntities['__proto__']` is Object.prototype rather than
+  // undefined, and the `undefined !== ...` test below then "expands" a
+  // declared &__proto__; to "[object Object]".
+  const baseEntities: Record<string, string> = Object.assign(
+    Object.create(null),
+    predefinedEntities,
+    options?.customEntities || {},
+  )
   const entityRE = /&(#x[0-9a-fA-F]+|#[0-9]+|[A-Za-z_:][A-Za-z0-9_\-\.:]*);/g
 
   function expand(
@@ -642,7 +647,12 @@ function parseDoctypeAttlists(body: string): Record<string, Record<string, strin
     while (s < body.length && isSpace(body[s])) s++
     return s
   }
-  const out: Record<string, Record<string, string>> = {}
+  // Keyed by element name, which the document controls, so it is allocated
+  // without a prototype. As a plain `{}` literal, an <!ATTLIST __proto__ ...>
+  // declaration made `out['__proto__']` read back Object.prototype - truthy,
+  // so the guard below reused it and the very next line wrote the attribute
+  // default onto Object.prototype, polluting every object in the process.
+  const out: Record<string, Record<string, string>> = Object.create(null)
 
   let i = 0
   while (i < body.length) {
@@ -705,7 +715,7 @@ function parseDoctypeAttlists(body: string): Record<string, Record<string, strin
         while (j < body.length && body[j] !== quote) j++
         if (j >= body.length) break
         const value = body.substring(valStart, j)
-        if (!out[elemName.name]) out[elemName.name] = {}
+        if (!out[elemName.name]) out[elemName.name] = Object.create(null)
         out[elemName.name][attrName.name] = value
         j++
       }
@@ -797,9 +807,13 @@ function parseDoctypeEntities(
   external: Record<string, string>
   unparsed: Record<string, string>
 } {
-  const internal: Record<string, string> = {}
-  const external: Record<string, string> = {}
-  const unparsed: Record<string, string> = {}
+  // Keyed by entity name from the document. On a plain literal `<!ENTITY
+  // __proto__ "...">` was silently dropped - the assignment ran the
+  // Object.prototype setter instead of defining a key - and any lookup of an
+  // inherited name resolved to an Object.prototype member.
+  const internal: Record<string, string> = Object.create(null)
+  const external: Record<string, string> = Object.create(null)
+  const unparsed: Record<string, string> = Object.create(null)
   const isSpace = (ch: string) =>
     ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r'
   const isNm = (ch: string) => isNameCharCP(ch.charCodeAt(0))
@@ -1145,24 +1159,27 @@ function buildXmlTagMatcher(
 
             const ents = parseDoctypeEntities(subset)
             if (Object.keys(ents.internal).length > 0) {
-              u.dtdEntities = { ...(u.dtdEntities || {}), ...ents.internal }
+              u.dtdEntities = Object.assign(
+                Object.create(null), u.dtdEntities || {}, ents.internal)
             }
             // Externally-declared general entities are declared (so a
             // reference to one is well-formed) but unresolvable, so
             // they are tracked apart from the expandable ones.
             if (Object.keys(ents.external).length > 0) {
-              u.dtdExternalEntities =
-                { ...(u.dtdExternalEntities || {}), ...ents.external }
+              u.dtdExternalEntities = Object.assign(
+                Object.create(null), u.dtdExternalEntities || {}, ents.external)
             }
             if (Object.keys(ents.unparsed).length > 0) {
-              u.dtdUnparsedEntities =
-                { ...(u.dtdUnparsedEntities || {}), ...ents.unparsed }
+              u.dtdUnparsedEntities = Object.assign(
+                Object.create(null), u.dtdUnparsedEntities || {}, ents.unparsed)
             }
             const atts = parseDoctypeAttlists(subset)
             if (Object.keys(atts).length > 0) {
-              const merged = { ...(u.dtdAttrDefaults || {}) }
+              const merged: Record<string, any> =
+                Object.assign(Object.create(null), u.dtdAttrDefaults || {})
               for (const elem of Object.keys(atts)) {
-                merged[elem] = { ...(merged[elem] || {}), ...atts[elem] }
+                merged[elem] = Object.assign(
+                  Object.create(null), merged[elem] || {}, atts[elem])
               }
               u.dtdAttrDefaults = merged
             }
@@ -1239,7 +1256,10 @@ function buildXmlTagMatcher(
       if (elemNameRes == null) return undefined
       const name = elemNameRes.name
       let i = elemNameRes.end
-      const attributes: Record<string, string> = {}
+      // Keyed by attribute names the document controls: as a plain `{}` an
+      // attribute called __proto__ was silently discarded rather than kept as
+      // an ordinary key, and a later write of it would reparent this map.
+      const attributes: Record<string, string> = Object.create(null)
 
       while (true) {
         const wsStart = i
@@ -1555,7 +1575,10 @@ function invalidNamespaceURI(uri: string): boolean {
 function resolveScope(
   element: XmlElement, scope: XmlScope, strict: boolean,
 ): string {
-  const ns = { ...scope.ns }
+  // Keyed by namespace prefixes the document controls, so it is allocated
+  // without a prototype: `xmlns:__proto__` would otherwise reparent the scope
+  // map, and prefix lookups would then resolve through Object.prototype.
+  const ns: Record<string, any> = Object.assign(Object.create(null), scope.ns)
   let space = scope.space
   let lang = scope.lang
 
