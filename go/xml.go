@@ -1015,7 +1015,7 @@ func buildXmlTagMatcher(
 						val = decode(normalised, dtdEntities(lex))
 					}
 					tkn := lex.Token("#TX", jsonic.TinTX, val, raw)
-					advance(pnt, sI, i)
+					advance(pnt, src, sI, i)
 					return tkn
 				}
 			}
@@ -1043,7 +1043,7 @@ func buildXmlTagMatcher(
 				finish := bodyEnd + 3
 				tsrc := src[sI:finish]
 				tkn := lex.Token("#XIG", xigTin, tsrc, tsrc)
-				advance(pnt, sI, finish)
+				advance(pnt, src, sI, finish)
 				return tkn
 			}
 
@@ -1062,7 +1062,7 @@ func buildXmlTagMatcher(
 				tsrc := src[sI:finish]
 				// §2.11 line-end normalisation applies to CDATA too.
 				tkn := lex.Token("#TX", jsonic.TinTX, normaliseLineEndings(text), tsrc)
-				advance(pnt, sI, finish)
+				advance(pnt, src, sI, finish)
 				return tkn
 			}
 
@@ -1220,7 +1220,7 @@ func buildXmlTagMatcher(
 				}
 				tsrc := src[sI:finish]
 				tkn := lex.Token("#XIG", xigTin, tsrc, tsrc)
-				advance(pnt, sI, finish)
+				advance(pnt, src, sI, finish)
 				return tkn
 			}
 
@@ -1258,7 +1258,7 @@ func buildXmlTagMatcher(
 				finish := bodyEnd + 2
 				tsrc := src[sI:finish]
 				tkn := lex.Token("#XIG", xigTin, tsrc, tsrc)
-				advance(pnt, sI, finish)
+				advance(pnt, src, sI, finish)
 				return tkn
 			}
 
@@ -1279,7 +1279,7 @@ func buildXmlTagMatcher(
 				finish := i + 1
 				tsrc := src[sI:finish]
 				tkn := lex.Token("#XCL", xclTin, name, tsrc)
-				advance(pnt, sI, finish)
+				advance(pnt, src, sI, finish)
 				setXmlDepth(lex, xmlDepth(lex)-1)
 				return tkn
 			}
@@ -1307,7 +1307,7 @@ func buildXmlTagMatcher(
 					tsrc := src[sI:finish]
 					val := map[string]any{"name": name, "attributes": attrs}
 					tkn := lex.Token("#XOP", xopTin, val, tsrc)
-					advance(pnt, sI, finish)
+					advance(pnt, src, sI, finish)
 					setXmlDepth(lex, xmlDepth(lex)+1)
 					return tkn
 				}
@@ -1316,7 +1316,7 @@ func buildXmlTagMatcher(
 					tsrc := src[sI:finish]
 					val := map[string]any{"name": name, "attributes": attrs}
 					tkn := lex.Token("#XSC", xscTin, val, tsrc)
-					advance(pnt, sI, finish)
+					advance(pnt, src, sI, finish)
 					// #XSC is an instantly-closed element; depth unchanged.
 					return tkn
 				}
@@ -1765,9 +1765,33 @@ func minInt(a, b int) int {
 	return b
 }
 
-func advance(pnt *jsonic.Point, from, to int) {
+// advance moves the lex point over src[from:to].
+//
+// SI is a BYTE offset and CI is a COLUMN, and a column counts characters,
+// not bytes. This used to add `to - from` to both, so a 2-byte `é`
+// charged two columns, a 3-byte `€` three and an astral character four:
+// every diagnostic after a non-ASCII character reported a column past
+// where the problem was. Measured against TypeScript, which adds
+// `end - sI` over UTF-16 indices and so counts characters:
+//
+//	input          TS col   Go before   Go after
+//	<a>xx</a><       10        10          10
+//	<a>é</a><         9        10           9
+//	<a>€</a><         9        11           9
+//	<a>😀</a><       10        12          10*
+//
+// (*) the astral row is 9 here and 10 there, which is the recorded
+// engine divergence — TypeScript counts UTF-16 units, Go counts runes.
+// Before this, that gap was two columns for the wrong reason as well as
+// the right one.
+//
+// The engine's own matchers do this arithmetic with
+// utf8.RuneCountInString; a plugin that brings its own matchers owns it.
+// Found by the fleet parity probe; the same defect was repaired in
+// tabnas/toml the same day.
+func advance(pnt *jsonic.Point, src string, from, to int) {
 	pnt.SI = to
-	pnt.CI += to - from
+	pnt.CI += utf8.RuneCountInString(src[from:to])
 }
 
 // XML 1.0 Fifth Edition NameStartChar (§2.3 [4]): ASCII letters,
