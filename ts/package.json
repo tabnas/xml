@@ -20,9 +20,11 @@
     "directory": "ts"
   },
   "scripts": {
-    "pretest": "bash ../scripts/fetch-xml-suite.sh",
+    "pretest": "npm run build && bash ../scripts/fetch-xml-suite.sh",
     "test": "node --enable-source-maps --test \"dist-test/*.test.js\"",
+    "pretest-some": "npm run build && bash ../scripts/fetch-xml-suite.sh",
     "test-some": "node --enable-source-maps --test-name-pattern=\"$npm_config_pattern\" --test \"dist-test/*.test.js\"",
+    "pretest-watch": "npm run build && bash ../scripts/fetch-xml-suite.sh",
     "test-watch": "node --test --watch dist-test/xml.test.js",
     "embed": "node embed-grammar.js",
     "watch": "tsc --build src test -w",
