@@ -318,14 +318,15 @@ runs `pre<name>` only for the matching name — `test-some` and `test-watch`
 would otherwise still run the previous artifact.
 
 That was not always true, and it is worth knowing why the line above no
-longer says `npm run build && npm test`. There was no `pretest` at all:
-`npm test` ran the compiled `dist-test/*.test.js` and compiled nothing, so
-on a fresh checkout it failed for want of `dist-test/` and on a stale one
-it passed against the previous build. This file documented that hazard and
-asked contributors to work around it by hand. Documenting a trap is not
-fixing it, and here it is what kept the trap alive — the paragraph made a
-defect read as an accepted condition. The wiring is fixed instead, and
-`make ax-stale-test-artifact` in tabnas/admin keeps it fixed.
+longer says `npm run build && npm test`. `pretest` existed but only
+fetched the W3C suite — it compiled nothing. So `npm test` ran the
+`dist-test/*.test.js` left over from last time: on a fresh checkout it
+failed for want of `dist-test/`, and on a stale one it passed against the
+previous build. This file documented that hazard and asked contributors to
+work around it by hand. Documenting a trap is not fixing it, and here it
+is what kept the trap alive — the paragraph made a defect read as an
+accepted condition. The wiring is fixed instead, and `make
+ax-stale-test-artifact` in tabnas/admin keeps it fixed.
 
 What "correct" means here, in order of authority:
 
