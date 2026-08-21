@@ -13,6 +13,8 @@ content, namespaces, entities, CDATA, comments, PIs, and DOCTYPE. The
 same parser ships in two languages: a TypeScript/JavaScript package on
 npm and a Go module.
 
+Docs, guides, the error reference and the playground: **[tabnas.dev](https://tabnas.dev)**.
+
 | Language   | Package                                  | Source                     |
 | ---------- | ---------------------------------------- | -------------------------- |
 | TypeScript | [`@tabnas/xml`](ts/)                     | [`ts/src/xml.ts`](ts/src/xml.ts) |
