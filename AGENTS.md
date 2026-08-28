@@ -352,6 +352,32 @@ reasons, which is the one thing the shared fixtures cannot catch on their own.
 The machine-readable list is [`tabnas.plugin.json`](tabnas.plugin.json)
 (`errorCodes`).
 
+The full set, with the message each raises. `{...}` are interpolated against
+the failing token; the hint text for each lives beside it in the catalogue.
+
+| Code | Message | Fixture |
+|---|---|---|
+| `xml_mismatched_tag` | `closing tag </{closename}> does not match opening tag <{openname}>` | yes |
+| `xml_invalid_tag` | `invalid tag: {src}` | yes |
+| `unterminated_comment` | `unterminated comment: {src}` | yes |
+| `unterminated_cdata` | `unterminated CDATA section: {src}` | yes |
+| `unterminated_pi` | `unterminated processing instruction: {src}` | yes |
+| `unterminated_doctype` | `unterminated DOCTYPE declaration: {src}` | yes |
+| `comment_double_dash` | `comment body cannot contain "--"` | – |
+| `cdata_terminator_in_text` | `character data cannot contain "]]>"` | – |
+| `pi_target_invalid` | `processing instruction target is missing or invalid` | – |
+| `lt_in_attr_value` | `"<" is not allowed in an attribute value` | – |
+| `bad_entity_ref` | `malformed entity reference (need &name; or &#NNN; or &#xHHH;)` | yes |
+| `duplicate_attribute` | `duplicate attribute name in tag` | – |
+| `invalid_xml_char` | `illegal control character in XML data` | – |
+| `reserved_namespace` | `invalid use of a reserved namespace prefix or URI` | yes |
+| `unbound_prefix` | `element or attribute uses an undeclared namespace prefix` | yes |
+| `invalid_namespace_uri` | `namespace name cannot contain white space` | yes |
+| `undeclared_entity` | `reference to undeclared entity` | yes |
+| `unparsed_entity_ref` | `reference to an unparsed (NDATA) entity` | yes |
+| `external_entity_in_attr` | `attribute value cannot reference an external entity` | yes |
+| `text_at_top_level` | `character data is not allowed outside the root element` | yes |
+
 ### Known coverage gap
 
 14 of the 20 declared codes are exercised by a fixture. **Six are declared but
@@ -417,3 +443,17 @@ document that needs them is a document to reject.
 Both hooks reach `w3.org` at test time. That is deliberate: the
 alternative was a suite that silently did not run, which is what CI did
 for the whole life of this repository before it.
+
+## Agent tooling
+
+An agent working in this repository does not have to drive it by hand. The
+org ships two things that already understand these grammars:
+
+- **[`@tabnas/mcp`](https://github.com/tabnas/mcp)** — an MCP server (stdio)
+  and the unified `tabnas` CLI: parse, validate and inspect any tabnas
+  format, this one included.
+- **[`tabnas/skills`](https://github.com/tabnas/skills)** — Agent Skills for
+  working on tabnas grammars and plugins.
+
+Prefer them over ad-hoc scripts when exploring a grammar or checking a parse
+result.
