@@ -1,4 +1,4 @@
-# Tutorial — your first XML parse (Go)
+# Tutorial: your first XML parse (Go)
 
 This walks you from nothing to a working parse of an XML document into a
 tree of Go values. Follow it in order; each step builds on the last. When
@@ -123,7 +123,7 @@ is added alongside, and the child `<title>` inherits it.
 
 ## 6. Catch an error
 
-When the input is not well-formed XML, `Parse` returns an `error` — it
+When the input is not well-formed XML, `Parse` returns an `error`; it
 never panics. Mismatched tags are a common case:
 
 ```go
@@ -141,8 +141,8 @@ for the full list of codes.
 
 ## Where to go next
 
-- [How-to guide](guide.md) — focused recipes for individual tasks.
-- [Reference](reference.md) — the public API, every option, and the
+- [How-to guide](guide.md). Focused recipes for individual tasks.
+- [Reference](reference.md). The public API, every option, and the
   accepted XML syntax.
-- [Concepts](concepts.md) — how the parser works on the engine, and how
+- [Concepts](concepts.md). How the parser works on the engine, and how
   the Go port differs from the TypeScript version.

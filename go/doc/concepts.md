@@ -1,18 +1,18 @@
 # Concepts (Go)
 
 Background on how the Go `xml` package works, and why it is built the way
-it is. This is understanding-oriented reading — for steps see the
+it is. This is understanding-oriented reading; for steps see the
 [tutorial](tutorial.md) and [how-to guide](guide.md); for exact
 signatures and options see the [reference](reference.md).
 
 ## A grammar plugin on the Jsonic engine
 
 This package is not a standalone XML parser. It is a **plugin** for the
-`jsonic` engine (`github.com/tabnas/jsonic/go`) — the relaxed-JSON
+`jsonic` engine (`github.com/tabnas/jsonic/go`), the relaxed-JSON
 parser. Jsonic is "a grammar on an engine": a configurable,
 matcher-based lexer plus a rule-based parser. This plugin adds XML by
-configuring that same machinery — a custom lexer matcher, four grammar
-rules, and option-driven reconfiguration — rather than hand-writing a
+configuring that same machinery (a custom lexer matcher, four grammar
+rules, and option-driven reconfiguration) rather than hand-writing a
 parser. Error reporting, source-location tracking, and the option system
 all come from the engine.
 
@@ -24,11 +24,11 @@ The **lexer** turns source text into tokens. The plugin registers one
 custom matcher (`xmltag`, at a high priority order) that recognises
 everything starting with `<` and emits five token kinds:
 
-- `#XOP` — open tag, carrying `map[string]any{"name", "attributes"}`
-- `#XSC` — self-closing tag, carrying the same
-- `#XCL` — close tag, carrying the name `string`
-- `#TX` — a run of character data (or a CDATA body)
-- `#XIG` — an *ignored* construct (comment, PI, DOCTYPE), dropped via the
+- `#XOP`. Open tag, carrying `map[string]any{"name", "attributes"}`
+- `#XSC`. Self-closing tag, carrying the same
+- `#XCL`. Close tag, carrying the name `string`
+- `#TX`. A run of character data (or a CDATA body)
+- `#XIG`. An *ignored* construct (comment, PI, DOCTYPE), dropped via the
   parser's IGNORE token set
 
 The matcher does the lexical work: rune-aware name scanning (Unicode
@@ -39,8 +39,8 @@ in comments, `<` in attribute values, malformed `&` references). It
 tracks XML nesting depth so that while inside an open element it claims
 the whole run up to the next `<` as a single `#TX` token.
 
-The **parser** then consumes those tokens with four rules — `xml`,
-`element`, `content`, `child` — each with open/close phases and short
+The **parser** then consumes those tokens with four rules (`xml`,
+`element`, `content`, `child`) each with open/close phases and short
 alternates with at most two tokens of lookahead. The grammar is small
 enough to read in one screen; it lives in the repository's top-level
 `xml-grammar.jsonic` (authored once, in relaxed-JSON) and is mirrored
@@ -57,7 +57,7 @@ tokens are unbound, the number/string/value/comment/space lexers are
 turned off, and Jsonic's now-unreachable value rules (`val`, `map`,
 `list`, `pair`, `elem`) are deleted. A dummy fixed token bound to an
 illegal XML character is registered so the lexer keeps a non-empty fixed
-table — without it, XML text containing a comma would be truncated at the
+table; without it, XML text containing a comma would be truncated at the
 comma. The input is then pure XML.
 
 **Embed mode** (`embed: true`) leaves Jsonic's grammar intact and adds an
@@ -70,8 +70,8 @@ the `element` rule, building an XML subtree wherever a value was expected.
 Lexing and the four rules build the raw tree verbatim. Namespace
 resolution is a separate single walk over the finished tree (the
 `@xml-bc` hook in pure mode, or an `element` close hook in embed mode).
-It threads three pieces of inherited scope down the tree — the
-prefix→URI bindings, the active `xml:space`, the active `xml:lang` —
+It threads three pieces of inherited scope down the tree (the
+prefix→URI bindings, the active `xml:space`, the active `xml:lang`),
 pre-binds the reserved `xml` prefix, rejects reserved-prefix/URI misuse
 and unbound prefixes, and records `prefix` / `namespace` / `space` /
 `lang` only where they apply. Turning `namespaces` off skips this pass.
@@ -125,16 +125,16 @@ untyped tree of plain values:
 | optional fields | absent properties             | absent map keys    |
 
 In embed mode, a number value inside a Jsonic document is a `float64` in
-Go (matching `encoding/json`), e.g. `{a:1}` → `map[string]any{"a":
+Go (matching `encoding/json`), for example `{a:1}` → `map[string]any{"a":
 float64(1)}`.
 
 ### Error reporting
 
 In TypeScript a malformed parse **throws** the engine error; the specific
-code (e.g. `xml_mismatched_tag`) appears in `err.message`. In Go `Parse`
+code (for example `xml_mismatched_tag`) appears in `err.message`. In Go `Parse`
 **returns** an `error` and never panics. The Go engine surfaces parse
 errors under a single top-level "unexpected" condition, so the specific
-code is encoded into the error message text rather than a typed field —
+code is encoded into the error message text rather than a typed field;
 branch on `strings.Contains(err.Error(), code)`. Both runtimes report the
 same row/column and the same set of error codes.
 

@@ -1,19 +1,19 @@
 # Concepts
 
 Background on how `@tabnas/xml` works, and why it is built the way it is.
-This is understanding-oriented reading — for steps see the
+This is understanding-oriented reading; for steps see the
 [tutorial](tutorial.md) and [how-to guide](guide.md); for exact
 signatures and options see the [reference](reference.md).
 
 ## A grammar plugin on the Jsonic engine
 
 This package is not a standalone XML parser. It is a **plugin** for the
-`tabnas` parsing engine — the same engine that drives
+`tabnas` parsing engine, the same engine that drives
 [`@tabnas/jsonic`](https://github.com/tabnas/jsonic), the relaxed-JSON
 grammar. Jsonic itself is "a grammar on an engine": a configurable,
 matcher-based lexer plus a rule-based parser. This plugin adds XML by
-configuring that same machinery — a custom lexer matcher, a handful of
-grammar rules, and some option-driven reconfiguration — rather than
+configuring that same machinery (a custom lexer matcher, a handful of
+grammar rules, and some option-driven reconfiguration) rather than
 hand-writing a parser.
 
 The payoff is reuse: error reporting, source-location tracking, the
@@ -30,32 +30,32 @@ everything starting with `<`: open tags, self-closing tags, close tags,
 comments, processing instructions, DOCTYPE, and CDATA. It emits five
 token kinds:
 
-- `#XOP` — an open tag, carrying `{ name, attributes }`
-- `#XSC` — a self-closing tag, carrying `{ name, attributes }`
-- `#XCL` — a close tag, carrying the name
-- `#TX` — a run of character data (or a CDATA body)
-- `#XIG` — an *ignored* construct (comment, PI, DOCTYPE), which the
+- `#XOP`. An open tag, carrying `{ name, attributes }`
+- `#XSC`. A self-closing tag, carrying `{ name, attributes }`
+- `#XCL`. A close tag, carrying the name
+- `#TX`. A run of character data (or a CDATA body)
+- `#XIG`. An *ignored* construct (comment, PI, DOCTYPE), which the
   parser's IGNORE set drops
 
-The matcher does the lexical heavy lifting: name scanning (Unicode-aware,
+The matcher does the lexical work: name scanning (Unicode-aware,
 including non-BMP code points), attribute parsing, entity decoding,
 end-of-line and attribute-value normalisation, and the well-formedness
 checks (illegal characters, `]]>` in text, `--` in comments, `<` in
 attribute values, malformed `&` references). It also tracks XML nesting
 depth so that while inside an open element it claims the whole text run up
-to the next `<` as a single `#TX` token — keeping JSON-syntax characters
+to the next `<` as a single `#TX` token, keeping JSON-syntax characters
 like `,` and `:` from being reinterpreted, which matters in embed mode.
 
 The **parser** then consumes those tokens with four small rules:
 
-- `xml` — the document: optional leading text, then one `element`,
+- `xml`. The document: optional leading text, then one `element`,
   gated so a *second* root cannot start.
-- `element` — `#XOP … #XCL` or `#XSC`; builds the element node.
-- `content` — loops over children until the matching `#XCL`.
-- `child` — one child: `#TX` text, or a nested `element`.
+- `element`: `#XOP … #XCL` or `#XSC`; builds the element node.
+- `content`. Loops over children until the matching `#XCL`.
+- `child`. One child: `#TX` text, or a nested `element`.
 
 Each rule has open/close phases and short alternates with at most two
-tokens of lookahead — the engine's deterministic, no-backtracking model.
+tokens of lookahead, the engine's deterministic, no-backtracking model.
 The full grammar is small enough to read in one screen; it lives in the
 repository's top-level `xml-grammar.jsonic` and is embedded verbatim into
 the source. The [railroad diagram](grammar.svg) is generated from this
@@ -83,7 +83,7 @@ surrounding parser is configured.
 *around* the XML rules: the start rule becomes `xml`, the JSON structural
 tokens (`{ } [ ] : ,`) are unbound, the number/string/value/comment/space
 lexers are turned off, and Jsonic's now-unreachable value rules (`val`,
-`map`, `list`, `pair`, `elem`) are deleted from the grammar — so the
+`map`, `list`, `pair`, `elem`) are deleted from the grammar, so the
 parser, and the generated diagram, carry only what XML uses. The input is
 then pure XML.
 
@@ -103,7 +103,7 @@ the finished tree (run by the `@xml-bc` hook in pure mode, or an
 inherited scope down the tree: the prefix→URI bindings, the active
 `xml:space`, and the active `xml:lang`. It pre-binds the reserved `xml`
 prefix, rejects reserved-prefix/URI misuse and unbound prefixes, and
-records `prefix` / `namespace` / `space` / `lang` on elements — but only
+records `prefix` / `namespace` / `space` / `lang` on elements, but only
 where they actually apply, so plain documents stay clean. Turning
 `namespaces` off simply skips this pass.
 
@@ -124,7 +124,7 @@ A few decisions shape what is accepted and what is rejected.
   entities are recognised but never fetched or expanded; the DOCTYPE
   declaration itself is dropped.
 - **CDATA is verbatim.** A `<![CDATA[…]]>` body becomes a text child with
-  no entity decoding — `&amp;` inside CDATA stays `&amp;` — matching XML
+  no entity decoding (`&amp;` inside CDATA stays `&amp;`) matching XML
   semantics.
 - **Strict entities by default.** Per XML 1.0 §4.1, an undeclared named
   entity is an error. `strictEntities: false` relaxes this for templating

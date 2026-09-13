@@ -8,7 +8,7 @@
 <!-- /tabnas-badges -->
 
 A grammar plugin for the [Jsonic](https://github.com/tabnas/jsonic) parser
-engine that parses XML text into a tree of elements — attributes, mixed
+engine that parses XML text into a tree of elements: attributes, mixed
 content, namespaces, entities, CDATA, comments, PIs, and DOCTYPE. The
 same parser ships in two languages: a TypeScript/JavaScript package on
 npm and a Go module.
@@ -65,7 +65,7 @@ result, _ := j.Parse(`<greeting lang="en">Hi <b>world</b></greeting>`)
 ## Documentation
 
 Each language guide follows the [Diátaxis](https://diataxis.fr)
-framework — a tutorial, how-to recipes, a complete reference, and an
+framework: a tutorial, how-to recipes, a complete reference, and an
 explanation of how it works.
 
 | | TypeScript | Go |

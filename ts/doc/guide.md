@@ -75,7 +75,7 @@ xml.parse('<a>&copy; 2025&nbsp;all rights</a>').children
 // => ['© 2025 all rights']
 ```
 
-You can also declare entities inline in a DOCTYPE internal subset — see
+You can also declare entities inline in a DOCTYPE internal subset; see
 [Use DOCTYPE entities and defaults](#use-doctype-entities-and-defaults).
 
 ## Allow unresolved entity references
@@ -117,8 +117,8 @@ xml.parse('<a>&amp;</a>').children
 ## Turn namespace resolution off
 
 Namespace resolution annotates elements with `prefix` / `namespace` and
-rejects unbound prefixes. To skip it — leaving `xmlns` declarations as
-plain attributes and never adding `namespace` — set `namespaces: false`:
+rejects unbound prefixes. To skip it (leaving `xmlns` declarations as
+plain attributes and never adding `namespace`), set `namespaces: false`:
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
