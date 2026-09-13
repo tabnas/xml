@@ -19,7 +19,7 @@ go get github.com/tabnas/xml/go
 The `jsonic` engine (`github.com/tabnas/jsonic/go`) is pulled in as a
 dependency. While building from a source checkout before the modules are
 published, clone `https://github.com/tabnas/jsonic` as a sibling of this
-repo — the module's `go.mod` resolves `github.com/tabnas/jsonic/go` via a
+repo; the module's `go.mod` resolves `github.com/tabnas/jsonic/go` via a
 `replace` directive to `../../jsonic/go`.
 
 ## Example
@@ -48,19 +48,19 @@ func main() {
 
 The result is a tree of plain Go values: each element is a
 `map[string]any` with `name`, `localName`, `attributes`
-(`map[string]any`), and `children` (`[]any`), plus — where they apply —
+(`map[string]any`), and `children` (`[]any`), plus, where they apply,
 `prefix`, `namespace`, `space`, and `lang`.
 
 ## Documentation
 
 Organised by the [Diátaxis](https://diataxis.fr) framework:
 
-- [Tutorial](doc/tutorial.md) — a guided first parse.
-- [How-to guide](doc/guide.md) — task recipes (options, errors, embed
+- [Tutorial](doc/tutorial.md). A guided first parse.
+- [How-to guide](doc/guide.md). Task recipes (options, errors, embed
   mode).
-- [Reference](doc/reference.md) — the public API, every option, and the
+- [Reference](doc/reference.md). The public API, every option, and the
   accepted XML syntax.
-- [Concepts](doc/concepts.md) — how the parser works on the engine, plus
+- [Concepts](doc/concepts.md). How the parser works on the engine, plus
   a "Differences from the TS version" section.
 
 ## License

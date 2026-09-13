@@ -19,7 +19,7 @@ if err := j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults); err != nil {
 }
 ```
 
-To change options, pass a third argument to `UseDefaults` — a
+To change options, pass a third argument to `UseDefaults`, a
 `map[string]any` of overrides (shown per recipe below).
 
 ## Parse a document
@@ -102,8 +102,8 @@ children := result.(map[string]any)["children"].([]any)
 ## Turn namespace resolution off
 
 Namespace resolution annotates elements with `prefix` / `namespace` and
-rejects unbound prefixes. To skip it — leaving `xmlns` declarations as
-plain attributes — set `namespaces: false`:
+rejects unbound prefixes. To skip it (leaving `xmlns` declarations as
+plain attributes), set `namespaces: false`:
 
 ```go
 j := tabnasjsonic.Make()

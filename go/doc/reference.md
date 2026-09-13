@@ -78,8 +78,8 @@ Element map keys:
 
 | Key          | Type     | Present when                                       |
 | ------------ | -------- | -------------------------------------------------- |
-| `name`       | `string` | always — the qualified name as written             |
-| `localName`  | `string` | always — the part after any `prefix:`              |
+| `name`       | `string` | always, the qualified name as written             |
+| `localName`  | `string` | always, the part after any `prefix:`              |
 | `prefix`     | `string` | the name has a prefix (namespaces on)              |
 | `namespace`  | `string` | a namespace is in scope (namespaces on)            |
 | `space`      | `string` | effective `xml:space` is non-default               |
@@ -114,13 +114,13 @@ pre-bound; `xml:space` / `xml:lang` are interpreted into `space` / `lang`.
 Reserved-prefix/URI misuse raises `reserved_namespace`, and a namespace
 name containing white space raises `invalid_namespace_uri` (a namespace
 name is a URI reference, and a URI reference cannot contain white
-space). A name using an *undeclared* prefix is not an error by default —
+space). A name using an *undeclared* prefix is not an error by default;
 see `strictNamespaces`. When `false`, no resolution runs.
 
 Namespace declarations are collected in a first pass over the element's
 attributes and prefixed names resolved in a second, because Namespaces
 in XML 1.0 §5.2 scopes a declaration over the whole element it appears
-on — including that element's own other attributes. Binding therefore
+on, including that element's own other attributes. Binding therefore
 does not depend on attribute order: `<a p:x="1" xmlns:p="…"/>` and
 `<a xmlns:p="…" p:x="1"/>` behave identically.
 
@@ -142,7 +142,7 @@ the same name and count as "declared" for strict validation.
 ### `strictEntities`
 
 When `true`, an unknown named entity raises `undeclared_entity`. When
-`false`, references to unknown names are left verbatim — useful for
+`false`, references to unknown names are left verbatim, useful for
 templating. Numeric references and the syntactic check are unaffected.
 
 Even when `true`, XML 1.0 §4.1 (WFC: Entity Declared) suspends the
@@ -151,8 +151,8 @@ if the DOCTYPE names an external subset, or the internal subset contains
 a parameter-entity reference, and the document does not declare
 `standalone="yes"`, an unknown entity name is left verbatim instead of
 raising. External general entities declared in the internal subset
-(`<!ENTITY e SYSTEM "…">`) are likewise *declared* — referencing one is
-well-formed — but are never fetched, so the reference stays verbatim.
+(`<!ENTITY e SYSTEM "…">`) are likewise *declared* (referencing one is
+well-formed) but are never fetched, so the reference stays verbatim.
 Two constraints still hold: an external entity may not be referenced in
 an attribute value (`external_entity_in_attr`), and an unparsed `NDATA`
 entity may not be referenced at all (`unparsed_entity_ref`).
@@ -160,8 +160,8 @@ entity may not be referenced at all (`unparsed_entity_ref`).
 ### `strictNamespaces`
 
 XML 1.0 well-formedness and Namespaces in XML 1.0 are **separate specs**.
-`<a><foo:b/></a>` is a well-formed XML document — `foo:b` is a legal Name
-— it is merely not *namespace*-well-formed. This parser implements XML
+`<a><foo:b/></a>` is a well-formed XML document (`foo:b` is a legal Name);
+it is merely not *namespace*-well-formed. This parser implements XML
 1.0, so by default an unbound prefix is not an error: the element still
 gets `prefix` and `localName`, and `namespace` is simply absent. Set to
 `true` to raise `unbound_prefix` instead.
@@ -258,5 +258,5 @@ rules:
 | `#XIG` | Ignored markup: comment, PI, or DOCTYPE               |
 | `#TX`  | Text / character data between tags (entities decoded) |
 
-For how these fit together as a grammar on the engine — and how the Go
-port differs from the TypeScript version — see [concepts](concepts.md).
+For how these fit together as a grammar on the engine (and how the Go
+port differs from the TypeScript version), see [concepts](concepts.md).

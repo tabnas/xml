@@ -33,19 +33,19 @@ xml.parse('<a>Tom &amp; Jerry</a>').children   // => ['Tom & Jerry']
 ```
 
 The result is an `XmlElement` tree: each element has `name`, `localName`,
-`attributes`, `children`, and — where they apply — `prefix`,
+`attributes`, `children`, and (where they apply) `prefix`,
 `namespace`, `space`, and `lang`.
 
 ## Documentation
 
 Organised by the [Diátaxis](https://diataxis.fr) framework:
 
-- [Tutorial](doc/tutorial.md) — a guided first parse.
-- [How-to guide](doc/guide.md) — task recipes (options, errors, embed
+- [Tutorial](doc/tutorial.md). A guided first parse.
+- [How-to guide](doc/guide.md). Task recipes (options, errors, embed
   mode).
-- [Reference](doc/reference.md) — the public API, every option, and the
+- [Reference](doc/reference.md). The public API, every option, and the
   accepted XML syntax.
-- [Concepts](doc/concepts.md) — how the parser works on the engine, and
+- [Concepts](doc/concepts.md). How the parser works on the engine, and
   why.
 
 ## Grammar diagram

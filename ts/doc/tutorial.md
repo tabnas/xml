@@ -1,4 +1,4 @@
-# Tutorial — your first XML parse
+# Tutorial: your first XML parse
 
 This walks you from nothing to a working parse of an XML document into a
 tree of plain JavaScript objects. Follow it in order; each step builds on
@@ -53,7 +53,7 @@ const xml = new Tabnas().use(jsonic).use(Xml)
 const doc = xml.parse('<a/>') as XmlElement
 ```
 
-The parser instance is reusable — call `parse` as many times as you
+The parser instance is reusable; call `parse` as many times as you
 like.
 
 ## 3. Read attributes and mixed content
@@ -169,7 +169,7 @@ error codes.
 
 ## Where to go next
 
-- [How-to guide](guide.md) — focused recipes for individual tasks.
-- [Reference](reference.md) — the public API, every option, and the
+- [How-to guide](guide.md). Focused recipes for individual tasks.
+- [Reference](reference.md). The public API, every option, and the
   accepted XML syntax.
-- [Concepts](concepts.md) — how the parser works on the engine, and why.
+- [Concepts](concepts.md). How the parser works on the engine, and why.
