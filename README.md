@@ -10,8 +10,8 @@
 A grammar plugin for the [Jsonic](https://github.com/tabnas/jsonic) parser
 engine that parses XML text into a tree of elements: attributes, mixed
 content, namespaces, entities, CDATA, comments, PIs, and DOCTYPE. The
-same parser ships in two languages: a TypeScript/JavaScript package on
-npm and a Go module.
+same parser ships in three languages: a TypeScript/JavaScript package
+on npm, a Go module and a Rust crate.
 
 Docs, guides, the error reference and the playground: **[tabnas.dev](https://tabnas.dev)**.
 
@@ -19,6 +19,7 @@ Docs, guides, the error reference and the playground: **[tabnas.dev](https://tab
 | ---------- | ---------------------------------------- | -------------------------- |
 | TypeScript | [`@tabnas/xml`](ts/)                     | [`ts/src/xml.ts`](ts/src/xml.ts) |
 | Go         | [`github.com/tabnas/xml/go`](go/)        | [`go/xml.go`](go/xml.go)   |
+| Rust       | [`tabnas-xml`](rs/)                      | [`rs/src/lib.rs`](rs/src/lib.rs) |
 
 ## Install
 
@@ -28,6 +29,9 @@ npm install @tabnas/parser @tabnas/jsonic @tabnas/xml
 
 # Go
 go get github.com/tabnas/xml/go
+
+# Rust: a sibling checkout, since the engine is not on crates.io.
+# See rs/README.md.
 ```
 
 ## Example
@@ -81,7 +85,8 @@ The repository layout:
 |---|---|
 | [`ts/`](ts/) | TypeScript / JavaScript implementation. |
 | [`go/`](go/) | Go port. |
-| [`test/spec/`](test/spec/) | Shared conformance fixtures, run by both runtimes. |
+| [`rs/`](rs/) | Rust port. |
+| [`test/spec/`](test/spec/) | Shared conformance fixtures, run by all three runtimes. |
 
 ## Grammar diagram
 
@@ -94,10 +99,11 @@ live grammar with
 An ASCII version is in [`ts/doc/grammar.txt`](ts/doc/grammar.txt).
 
 The grammar is defined once in the top-level
-[`xml-grammar.jsonic`](xml-grammar.jsonic) and embedded into both
-implementations by [`ts/embed-grammar.js`](ts/embed-grammar.js): the text
-is spliced verbatim into [`ts/src/xml.ts`](ts/src/xml.ts), and
-[`go/xml.go`](go/xml.go) mirrors the same rules. Run
+[`xml-grammar.jsonic`](xml-grammar.jsonic).
+[`ts/embed-grammar.js`](ts/embed-grammar.js) splices its text verbatim
+into [`ts/src/xml.ts`](ts/src/xml.ts); [`go/xml.go`](go/xml.go) mirrors
+the same rules, and [`rs/src/lib.rs`](rs/src/lib.rs) carries the same
+grammar as JSON, checked against the file by the Rust suite. Run
 `cd ts && npm run build` (or `npm run embed`) after editing the grammar
 to re-embed it.
 
