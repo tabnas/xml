@@ -44,8 +44,8 @@ use std::sync::{Arc, OnceLock};
 
 use indexmap::IndexMap;
 use tabnas::{
-    ActionError, Context, LexMatcher, Options, Plugin, PluginError, Rule, Tabnas, Token, Value,
-    TIN_CM, TIN_LN, TIN_SP,
+    Context, LexMatcher, Options, Plugin, PluginError, Rule, Tabnas, Token, Value, TIN_CM, TIN_LN,
+    TIN_SP,
 };
 
 mod bom;
@@ -722,9 +722,16 @@ fn register_refs(parser: &mut Tabnas, namespaces: bool, strict_namespaces: bool,
         context.u.insert("rootSeen".to_string(), Value::Bool(true));
         if namespaces {
             if let Err(code) = namespace::resolve_namespaces(&mut root, strict_namespaces) {
-                let Some(mut token) = context.t0().cloned() else {
-                    return Err(ActionError::new(code, "namespace resolution failed"));
-                };
+                // The canonical writes `ctx.t0.bad(nsErr)` here. Namespace
+                // resolution runs at DOCUMENT CLOSE, where no token is
+                // current, so the canonical's `t0` is the no-token
+                // sentinel, and its report lands at the start of the
+                // source (row 1, column 1). Marking the same sentinel
+                // keeps the failure inside the engine's error machinery,
+                // which is what renders the template registered for
+                // `code`. An `ActionError` here would bypass that and
+                // hand the caller a literal stand-in message instead.
+                let mut token = context.t0().cloned().unwrap_or_else(Token::no_token);
                 token.bad(code);
                 return Ok(Some(token));
             }
