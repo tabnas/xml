@@ -19,7 +19,7 @@ use tabnas::{Tabnas, Value};
 use tabnas_support::{equal_value, format_value};
 use tabnas_xml::{decode_bom, make, make_with, parse, plugin, xml, XmlOptions, GRAMMAR_TEXT};
 
-use common::{json, repo_root, to_value};
+use common::{json, repo_root, strip_ansi, to_value};
 
 fn embed() -> Tabnas {
     make_with(&XmlOptions {
@@ -144,6 +144,77 @@ fn errors_carry_the_code_the_position_and_the_rendered_message() {
     );
     assert!(report.contains("Expected </b> but found </c>."), "{report}");
     assert!(report.contains("[jsonic/xml_mismatched_tag]"), "{report}");
+}
+
+/// Namespace resolution runs at DOCUMENT CLOSE, after the last token has
+/// been consumed, so there is no current token to mark. The canonical
+/// marks its no-token sentinel there and reports at the start of the
+/// source; a port that raises a bare action error instead leaves the
+/// engine's template machinery unused and hands the caller a literal
+/// stand-in message. Each of the three namespace codes is pinned by its
+/// FULL rendered text, its hint and its position: pinning the code alone
+/// would pass against the stand-in.
+///
+/// Measured against `ts/src/xml.ts` through `ts/dist/xml.js`: every case
+/// below reports at row 1, column 1, including the multi-line one whose
+/// offending element sits on row 3.
+#[test]
+fn a_namespace_failure_renders_its_template_at_the_start_of_the_source() {
+    let strict = make_with(&XmlOptions {
+        strict_namespaces: true,
+        ..Default::default()
+    });
+    // The default bag is lenient about an unbound prefix, but a reserved
+    // prefix and a namespace name with white space are refused either way.
+    let lenient = make();
+
+    // (parser, source, code, message, hint)
+    let cases: [(&Tabnas, &str, &str, &str, &str); 4] = [
+        (
+            &strict,
+            "<a><foo:b/></a>",
+            "unbound_prefix",
+            "element or attribute uses an undeclared namespace prefix",
+            "Declare the prefix with xmlns:prefix=\"...\" on this element or one of its ancestors.",
+        ),
+        // The offending element is on row 3; the report still lands on
+        // row 1, column 1, as the canonical's does.
+        (
+            &strict,
+            "<a>\n  <b>\n    <foo:c/>\n  </b>\n</a>",
+            "unbound_prefix",
+            "element or attribute uses an undeclared namespace prefix",
+            "Declare the prefix with xmlns:prefix=\"...\" on this element or one of its ancestors.",
+        ),
+        (
+            &lenient,
+            "<a>\n  <b xmlns:xml=\"http://wrong\"/>\n</a>",
+            "reserved_namespace",
+            "invalid use of a reserved namespace prefix or URI",
+            "The \"xml\" prefix is fixed to http://www.w3.org/XML/1998/namespace;",
+        ),
+        (
+            &lenient,
+            "<a>\n  <b xmlns=\"http://x y\"/>\n</a>",
+            "invalid_namespace_uri",
+            "namespace name cannot contain white space",
+            "A namespace name is a URI reference, and a URI reference cannot contain white space;",
+        ),
+    ];
+
+    for (parser, source, code, message, hint) in cases {
+        let error = parser.parse(source).unwrap_err();
+        assert_eq!(error.code, code, "{source:?}");
+        assert_eq!((error.row, error.col), (1, 1), "{source:?}");
+
+        let report = strip_ansi(&error.to_string());
+        let first = report.lines().next().unwrap_or_default();
+        assert_eq!(first, format!("[jsonic/{code}]: {message}"), "{report}");
+        assert!(report.contains(hint), "{report}");
+        // The caret line repeats the message, so the stand-in must be
+        // absent from the whole report, not merely from its first line.
+        assert!(!report.contains("namespace resolution failed"), "{report}");
+    }
 }
 
 // ---------------------------------------------------------------------------

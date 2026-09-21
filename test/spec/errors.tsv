@@ -68,6 +68,17 @@ unterminated-cdata-message	<a><![CDATA[x	ERROR:unterminated_cdata		unterminated 
 unterminated-pi-message	<a><?t x	ERROR:unterminated_pi		unterminated processing instruction: <?t x
 unterminated-doctype-message	<!DOCTYPE a [<!ENTITY x "y">	ERROR:unterminated_doctype		unterminated DOCTYPE declaration: <!DOCTYPE a
 no-placeholder-leak-mismatched	<a></b>	ERROR:xml_mismatched_tag		does not match opening tag <a>
+
+# The three namespace codes are raised at DOCUMENT CLOSE, once the whole
+# tree is in place, so there is no current token to carry the failure.
+# A port that raises a bare action error there never reaches the template
+# table and hands the caller a literal stand-in instead, which pins by
+# code alone would not catch -- so the rendered text and the hint are
+# pinned here too.
+unbound-prefix-message	<a><foo:b/></a>	ERROR:unbound_prefix	{"strictNamespaces":true}	element or attribute uses an undeclared namespace prefix
+unbound-prefix-hint-message	<a><foo:b/></a>	ERROR:unbound_prefix	{"strictNamespaces":true}	Declare the prefix with xmlns:prefix="..." on this element or one of its ancestors.
+reserved-namespace-message	<a xmlns:xmlns="http://example.com"/>	ERROR:reserved_namespace		invalid use of a reserved namespace prefix or URI
+invalid-namespace-uri-message	<a xmlns="http://x.example/ /y"/>	ERROR:invalid_namespace_uri		namespace name cannot contain white space
 text-after-root	<a/>junk	ERROR:text_at_top_level
 text-before-root	junk<a/>	ERROR:text_at_top_level
 text-between-roots	<a/>junk<b/>	ERROR:text_at_top_level
