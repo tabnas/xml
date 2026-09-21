@@ -41,3 +41,6 @@ test/xmlconf/
 
 # Written by the counts script while measuring, removed after.
 .vale-counts.ini
+
+# Rust build output (rs/ crate).
+target/

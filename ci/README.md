@@ -21,3 +21,15 @@ This directory exists because session credentials cannot write
   suite already runs the other half of the gate
   (`ts/test/docs.test.js`), so promoting this adds the spelling and
   Google-convention arm rather than the whole gate.
+
+- **`workflows/rust.yml`** — the Rust gate for the `rs/` crate. It runs
+  `ci/rust/run.sh`, which is the same script a contributor runs locally,
+  so the hosted and local gates cannot drift.
+
+  It needs no secrets, but it does need the four sibling checkouts the
+  crate resolves by path (`parser`, `json`, `jsonic` and `support`,
+  cloned by the job), and network access to w3.org for the W3C
+  conformance corpus, which the suite fetches on first use and which
+  fails the run rather than skipping when it cannot be fetched. It is a
+  standalone workflow rather than an arm of `ci.yml`, because `ci.yml`
+  calls the org-shared polyglot workflow and that takes no Rust input.

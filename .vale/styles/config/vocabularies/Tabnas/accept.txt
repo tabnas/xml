@@ -8,9 +8,12 @@
 # Vale enforce one spelling over the other, and it then reports the
 # other as a misspelling.
 
+clippy
 [Jj]sonic
 [Ll]exing
 [Ll]ookahead
+lockfile
+lookaround
 [Nn]amespace
 [Nn]amespaces
 [Nn]pm
