@@ -94,6 +94,42 @@ pub(crate) fn read_name(s: &str, start: usize) -> Option<(&str, usize)> {
     Some((&s[start..end], end))
 }
 
+/// Read an entity declaration's name, over UTF-16 CODE UNITS.
+///
+/// `parseDoctypeEntities` in `ts/src/xml.ts` is the one name scanner of
+/// the canonical plugin that tests `charCodeAt` rather than
+/// `codePointAt`: `isNameStartCP(body.charCodeAt(j))` and, for the rest
+/// of the name, `isNameCharCP(ch.charCodeAt(0))`. A non-BMP character is
+/// two code units there, each of them a surrogate in `D800..DFFF`, and
+/// neither the NameStartChar nor the NameChar production admits one. So
+/// `<!ENTITY \u{1F600} "x">` declares nothing at all, and a later
+/// `&\u{1F600};` is an `undeclared_entity`, while the NAMES of elements
+/// and attributes, read by the matcher's own scanner and by
+/// `readNameInBody`, do admit the same character.
+///
+/// The canonical plugin is inconsistent here rather than deliberate, and
+/// XML 1.0 [4] admits `#x10000-#xEFFFF` in a NameStartChar, so the
+/// declaration is well-formed and ought to be recorded. TypeScript is
+/// canonical all the same, so this scanner reproduces the narrower test
+/// and [`read_name`] keeps the full production for every other site. See
+/// `rs/AGENTS.md`.
+fn read_declaration_name(s: &str, start: usize) -> Option<(&str, usize)> {
+    let bmp = |ch: char| (ch as u32) <= 0xffff;
+    let mut chars = s[start..].char_indices();
+    let (_, first) = chars.next()?;
+    if !bmp(first) || !is_name_start(first) {
+        return None;
+    }
+    let mut end = start + first.len_utf8();
+    for (offset, ch) in chars {
+        if !bmp(ch) || !is_name_char(ch) {
+            break;
+        }
+        end = start + offset + ch.len_utf8();
+    }
+    Some((&s[start..end], end))
+}
+
 /// `Some("invalid_xml_char")` when `s` holds a C0 control other than tab,
 /// newline or carriage return. Only the C0 band is checked; the full Char
 /// production (which also excludes U+FFFE, U+FFFF and unpaired
@@ -368,11 +404,25 @@ pub(crate) struct DoctypeEntities {
     pub(crate) unparsed: HashMap<String, String>,
 }
 
+/// The body of a character class matching exactly what JavaScript's `\s`
+/// matches: ECMA-262 WhiteSpace and LineTerminator, which is the Unicode
+/// Space_Separator category plus tab, vertical tab, form feed, carriage
+/// return, line feed, the two line/paragraph separators and U+FEFF.
+///
+/// The `regex` crate reads `\s` as `\p{White_Space}` instead, and the two
+/// sets are not the same: `\p{White_Space}` has U+0085 (NEL) and has no
+/// U+FEFF. Both differences are reachable from a DOCTYPE, where these
+/// patterns run over text the document supplies, so every pattern ported
+/// from a JavaScript `\s` spells the class out with this.
+const JS_SPACE: &str =
+    r"\t\n\x0B\f\r \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}";
+
 /// The NDATA marker of an unparsed entity declaration (4.2.2 [76]).
 fn ndata_pattern() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r#"(^|[\s"'])NDATA([\s"']|$)"#).expect("the NDATA pattern is a literal")
+        Regex::new(&format!(r#"(^|[{JS_SPACE}"'])NDATA([{JS_SPACE}"']|$)"#))
+            .expect("the NDATA pattern is a literal")
     })
 }
 
@@ -390,19 +440,30 @@ pub(crate) fn pe_ref_pattern() -> &'static Regex {
 pub(crate) fn external_id_pattern() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r#"(^|[\s>])(SYSTEM|PUBLIC)([\s"'])"#)
-            .expect("the ExternalID pattern is a literal")
+        Regex::new(&format!(
+            r#"(^|[{JS_SPACE}>])(SYSTEM|PUBLIC)([{JS_SPACE}"'])"#
+        ))
+        .expect("the ExternalID pattern is a literal")
     })
 }
 
 /// A `standalone="yes"` standalone document declaration (2.9 [32]). The
 /// canonical pattern pairs the quotes with a backreference, which the
 /// `regex` crate has no syntax for, so both quotings are spelled out.
+///
+/// Its `\b` is the other half of the class question. A JavaScript regular
+/// expression without the `u` flag takes a word character to be ASCII, so
+/// `standalone` after `\u{e9}` is at a boundary there; the `regex` crate
+/// reads `\w` as Unicode, where the same position is inside a word.
+/// `(?-u:\b)` asks for the ASCII boundary, and matches nothing itself, so
+/// the pattern stays a UTF-8 one. See [`JS_SPACE`] for the `\s` half.
 pub(crate) fn standalone_yes_pattern() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r#"\bstandalone\s*=\s*("yes"|'yes')"#)
-            .expect("the standalone pattern is a literal")
+        Regex::new(&format!(
+            r#"(?-u:\b)standalone[{JS_SPACE}]*=[{JS_SPACE}]*("yes"|'yes')"#
+        ))
+        .expect("the standalone pattern is a literal")
     })
 }
 
@@ -431,7 +492,10 @@ pub(crate) fn parse_doctype_entities(body: &str) -> DoctypeEntities {
             i = body[j..].find('>').map_or(body.len(), |end| j + end + 1);
             continue;
         }
-        let Some((name, after)) = read_name(body, j) else {
+        // The canonical scanner tests one UTF-16 code unit here, so a
+        // non-BMP name start is not a name start at all; see
+        // `read_declaration_name`.
+        let Some((name, after)) = read_declaration_name(body, j) else {
             i = after_char(body, j);
             continue;
         };
@@ -575,6 +639,42 @@ mod tests {
         assert_eq!(read_name("<1a>", 1), None);
         assert_eq!(read_name("a-b.c>", 0), Some(("a-b.c", 5)));
         assert_eq!(read_name("", 0), None);
+    }
+
+    #[test]
+    fn declaration_names_stop_at_the_basic_multilingual_plane() {
+        // The canonical scanner reads UTF-16 code units, so an astral
+        // character is two surrogates and neither is a name character.
+        // Everything within the plane reads as `read_name` reads it.
+        assert_eq!(read_declaration_name("a-b.c>", 0), Some(("a-b.c", 5)));
+        assert_eq!(read_declaration_name("<เจมส์>", 1), read_name("<เจมส์>", 1));
+        assert_eq!(read_declaration_name("\u{1F600} ", 0), None);
+        assert_eq!(read_declaration_name("a\u{1F600}b ", 0), Some(("a", 1)));
+        assert_eq!(read_declaration_name("", 0), None);
+        // `read_name` keeps the full XML 1.0 production for every other
+        // site, which is the difference this scanner exists to hold.
+        assert_eq!(
+            read_name("\u{1F600} ", 0),
+            Some(("\u{1F600}", "\u{1F600}".len()))
+        );
+    }
+
+    #[test]
+    fn ported_patterns_use_the_javascript_whitespace_class() {
+        // U+FEFF is whitespace to JavaScript and not to `\p{White_Space}`;
+        // U+0085 is the reverse. Both patterns must answer as JavaScript
+        // does, whatever the `regex` crate would say for `\s`.
+        assert!(ndata_pattern().is_match("SYSTEM \"u\"\u{feff}NDATA n"));
+        assert!(!ndata_pattern().is_match("SYSTEM \"u\"\u{85}NDATA n"));
+        assert!(ndata_pattern().is_match("SYSTEM \"u\"\u{a0}NDATA n"));
+        assert!(external_id_pattern().is_match(" d\u{feff}SYSTEM \"u\""));
+        assert!(!external_id_pattern().is_match(" d\u{85}SYSTEM \"u\""));
+        // `\b` is the ASCII boundary of a JavaScript pattern without the
+        // `u` flag, so a preceding non-ASCII letter still opens a word.
+        assert!(standalone_yes_pattern().is_match("a\u{e9}standalone=\"yes\""));
+        assert!(!standalone_yes_pattern().is_match("astandalone=\"yes\""));
+        assert!(standalone_yes_pattern().is_match("standalone\u{feff}=\u{feff}\"yes\""));
+        assert!(!standalone_yes_pattern().is_match("standalone\u{85}=\"yes\""));
     }
 
     #[test]

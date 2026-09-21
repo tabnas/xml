@@ -257,28 +257,10 @@ impl XmlOptions {
         let field = |name: &str| bag.get(name);
         let not_false = |name: &str| field(name) != Some(&serde_json::Value::Bool(false));
         let is_true = |name: &str| field(name) == Some(&serde_json::Value::Bool(true));
-        let custom_entities = match field("customEntities") {
-            Some(serde_json::Value::Object(entries)) => entries
-                .iter()
-                .map(|(name, text)| {
-                    // A non-string value is coerced the way `String.replace`
-                    // coerces a replacement: an integral number without a
-                    // fraction, everything else as its JSON text.
-                    let text = match text {
-                        serde_json::Value::String(text) => text.clone(),
-                        serde_json::Value::Number(number) => match number.as_f64() {
-                            Some(float) if float.fract() == 0.0 && float.abs() < 1e21 => {
-                                format!("{float:.0}")
-                            }
-                            _ => number.to_string(),
-                        },
-                        other => other.to_string(),
-                    };
-                    (name.clone(), text)
-                })
-                .collect(),
-            _ => IndexMap::new(),
-        };
+        // Read the replacements from the engine value, not from the JSON
+        // projection: `to_json` spells `undefined`, `NaN` and an infinity
+        // all three `null`, and the canonical coercion tells them apart.
+        let custom_entities = custom_entities(value);
         XmlOptions {
             namespaces: not_false("namespaces"),
             entities: not_false("entities"),
@@ -309,6 +291,161 @@ impl XmlOptions {
         );
         bag.insert("embed".to_string(), Value::Bool(self.embed));
         Value::object(bag)
+    }
+}
+
+/// The `customEntities` replacements of a loose option bag.
+///
+/// The canonical plugin hands each replacement straight back from the
+/// `String.prototype.replace` callback in `buildEntityDecoder`, so
+/// JavaScript coerces it with `ToString`: an object becomes
+/// `[object Object]`, an array joins its elements with commas, and a
+/// number spells itself the way `Number::toString` does. [`js_string`]
+/// is that coercion.
+///
+/// `undefined` is the one value the callback never coerces: the guard
+/// there is `undefined !== baseEntities[ref]`, so the name counts as
+/// declared (no `undeclared_entity`) while the reference is left in the
+/// text exactly as written. The replacement text recorded here is that
+/// verbatim reference, which reads back identically. The one input where
+/// the two part company is a name that a DOCTYPE internal subset also
+/// declares: the canonical decoder falls through to the DTD value, while
+/// this map answers first. A `String` replacement cannot express "no
+/// replacement", and [`XmlOptions::custom_entities`] is a map of them.
+fn custom_entities(bag: &Value) -> IndexMap<String, String> {
+    // A bag built by the engine's plugin merge is an `Object`; one handed
+    // in from a parse result may still be the `MapRef` the parse built,
+    // and every other field here reads that shape through `to_json`.
+    let fields = match bag {
+        Value::Object(fields) => &**fields,
+        Value::MapRef(map) => &map.value,
+        _ => return IndexMap::new(),
+    };
+    let entries = match fields.get("customEntities") {
+        Some(Value::Object(entries)) => &**entries,
+        Some(Value::MapRef(map)) => &map.value,
+        _ => return IndexMap::new(),
+    };
+    entries
+        .iter()
+        .map(|(name, replacement)| {
+            let text = match replacement {
+                Value::String(text) => text.clone(),
+                Value::Text(text) => text.string.clone(),
+                Value::Undefined => format!("&{name};"),
+                other => js_string(other),
+            };
+            (name.clone(), text)
+        })
+        .collect()
+}
+
+/// `String(value)` as JavaScript spells it.
+///
+/// Ported from the same helper in the yaml and csv crates. An array
+/// joins its elements with commas, rendering `null` and `undefined` as
+/// nothing at all (`Array.prototype.join`), and any object is the bare
+/// `[object Object]`, since a value parsed out of an option bag carries
+/// no `toString` of its own.
+fn js_string(value: &Value) -> String {
+    match value {
+        Value::Undefined => "undefined".to_string(),
+        Value::Null => "null".to_string(),
+        Value::Bool(flag) => flag.to_string(),
+        Value::Number(number) => js_number_to_string(*number),
+        Value::String(text) => text.clone(),
+        Value::Text(text) => text.string.clone(),
+        Value::Array(items) => items
+            .iter()
+            .map(|item| match item {
+                Value::Undefined | Value::Null => String::new(),
+                other => js_string(other),
+            })
+            .collect::<Vec<_>>()
+            .join(","),
+        Value::ListRef(list) => js_string(&Value::array(list.value.clone())),
+        Value::Object(_) | Value::MapRef(_) => "[object Object]".to_string(),
+    }
+}
+
+/// `String(number)` as JavaScript spells it (ECMA-262 6.1.6.1.20): the
+/// shortest digit string that reads back as the same double, in plain
+/// decimal while the decimal point stays inside `(-6, 21]` and in
+/// exponent form outside it.
+///
+/// Rust's own formatting differs in three ways that reach a replacement
+/// text: it keeps the sign of negative zero, it never switches to
+/// exponent form, and a large integral float prints its exact binary
+/// value rather than its shortest round-tripping digits. Ported from
+/// `js_number_to_string` in the csv and yaml crates.
+fn js_number_to_string(number: f64) -> String {
+    if number.is_nan() {
+        return "NaN".to_string();
+    }
+    // Catches -0.0 as well: JavaScript spells both zeros "0".
+    if number == 0.0 {
+        return "0".to_string();
+    }
+    if number < 0.0 {
+        return format!("-{}", js_number_to_string(-number));
+    }
+    if number.is_infinite() {
+        return "Infinity".to_string();
+    }
+
+    // The specification wants the shortest digit string `s` that round
+    // trips (length `k`), and `n`, the position of the decimal point
+    // relative to it. Rust's `{:e}` yields digits of exactly that length.
+    let shortest = format!("{number:e}");
+    let shortest_k = shortest
+        .split_once('e')
+        .map(|(mantissa, _)| mantissa.chars().filter(char::is_ascii_digit).count())
+        .expect("a finite f64 always formats with an exponent");
+
+    // Re-render to that same length to settle a tie. Where two digit
+    // strings of length `k` are equally close to `number`, the
+    // specification takes the one ending in an even digit; Rust's
+    // shortest form does not, but its exactly-rounded fixed-precision
+    // form does.
+    let exponential = format!("{:.*e}", shortest_k - 1, number);
+    let (mantissa, exponent) = exponential
+        .split_once('e')
+        .expect("a finite f64 always formats with an exponent");
+    // Rounding can leave trailing zeros (and, on a carry, one digit too
+    // many); dropping them keeps `s` shortest, which is what `k` means.
+    let digits = mantissa
+        .chars()
+        .filter(|digit| *digit != '.')
+        .collect::<String>();
+    let digits = digits.trim_end_matches('0');
+    let digits = if digits.is_empty() { "0" } else { digits };
+    let k = digits.len() as i32;
+    let n = exponent
+        .parse::<i32>()
+        .expect("a formatted exponent is an integer")
+        + 1;
+
+    // The four cases of the specification, in its order. The range bounds
+    // are `k <= n <= 21`, `0 < n <= 21` and `-6 < n <= 0`.
+    if (k..=21).contains(&n) {
+        // Integral, with n - k trailing zeros to restore.
+        let mut text = digits.to_string();
+        text.push_str(&"0".repeat((n - k) as usize));
+        text
+    } else if (1..=21).contains(&n) {
+        let point = n as usize;
+        format!("{}.{}", &digits[..point], &digits[point..])
+    } else if (-5..=0).contains(&n) {
+        format!("0.{}{}", "0".repeat(-n as usize), digits)
+    } else {
+        // Exponent form. `n - 1` is never 0 here, so the sign is never "+0".
+        let sign = if n - 1 < 0 { '-' } else { '+' };
+        let power = (n - 1).abs();
+        if k == 1 {
+            format!("{digits}e{sign}{power}")
+        } else {
+            format!("{}.{}e{sign}{power}", &digits[..1], &digits[1..])
+        }
     }
 }
 
@@ -398,7 +535,12 @@ fn push_child(node: &mut Value, child: Value) {
 /// before or after the root element is not well-formed. Comments, PIs and
 /// the DOCTYPE arrive as `#XIG` and are ignored by the token set, so the
 /// only document-level token to police is `#TX`.
-fn check_doc_text(token: Option<&Token>) -> Option<Token> {
+///
+/// The token policed here is one of the few this plugin does not mint:
+/// outside the root element the matcher claims nothing, so the engine's
+/// own text matcher cuts it, and its column has not been through
+/// [`lex::discount_bom`] yet.
+fn check_doc_text(token: Option<&Token>, context: &Context) -> Option<Token> {
     let token = token?;
     let Value::String(text) = &token.val else {
         return None;
@@ -410,6 +552,7 @@ fn check_doc_text(token: Option<&Token>) -> Option<Token> {
         return None;
     }
     let mut bad = token.clone();
+    lex::discount_bom(context, &mut bad.site);
     bad.bad("text_at_top_level");
     Some(bad)
 }
@@ -598,11 +741,11 @@ fn register_refs(parser: &mut Tabnas, namespaces: bool, strict_namespaces: bool,
         !matches!(context.u.get("rootSeen"), Some(Value::Bool(true)))
     });
 
-    parser.action_with_match_ref(DOC_TEXT_OPEN, |rule, _context, _matched| {
-        Ok(check_doc_text(rule.o0()))
+    parser.action_with_match_ref(DOC_TEXT_OPEN, |rule, context, _matched| {
+        Ok(check_doc_text(rule.o0(), context))
     });
-    parser.action_with_match_ref(DOC_TEXT_CLOSE, |rule, _context, _matched| {
-        Ok(check_doc_text(rule.c0()))
+    parser.action_with_match_ref(DOC_TEXT_CLOSE, |rule, context, _matched| {
+        Ok(check_doc_text(rule.c0(), context))
     });
 
     parser.action_with_context(ELEMENT_OPEN, |rule, context| {

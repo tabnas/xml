@@ -68,6 +68,39 @@ const DTD_UNPARSED: &str = "dtdUnparsedEntities";
 const DTD_ATTR_DEFAULTS: &str = "dtdAttrDefaults";
 const DTD_UNREAD: &str = "dtdUnread";
 const STANDALONE: &str = "xmlStandalone";
+/// The row a byte-order mark was skipped on, and the one key here the
+/// canonical plugin has no counterpart for: it keeps its own cursor and
+/// never charges the mark a column, while this port hands the cursor to
+/// the engine, which charges one for every character it passes. See
+/// [`discount_bom`].
+const BOM_ROW: &str = "xmlBomRow";
+
+/// Undo the display column the engine charged for a skipped byte-order
+/// mark.
+///
+/// The mark is an encoding signature, not document content: it occupies
+/// no column, so `ts/src/xml.ts` advances `pnt.sI` alone and `go/xml.go`
+/// advances `pnt.SI` alone, and every token after one keeps the column
+/// it would have had in a document without it. This port cannot move the
+/// engine's cursor without also moving its column, so the column comes
+/// off the token instead, on the row the mark was on and no other.
+///
+/// It reaches every token this matcher mints, and `check_doc_text` in
+/// `lib.rs` applies it to the one token the plugin reports against but
+/// does not mint, so every diagnostic the plugin raises lands where the
+/// canonical plugin lands it. What it cannot reach is the engine's own
+/// `unexpected`: that is raised against a token the ENGINE minted, at
+/// end of source (`#ZZ`, returned before any matcher runs) or over
+/// markup this matcher declined, and those keep the extra column.
+/// `a_byte_order_mark_costs_no_column` pins both halves.
+pub(crate) fn discount_bom(context: &Context, site: &mut tabnas::Site) {
+    let Some(Value::Number(row)) = context.u.get(BOM_ROW) else {
+        return;
+    };
+    if site.ri == *row as usize && 1 < site.ci {
+        site.ci -= 1;
+    }
+}
 
 /// The XML nesting depth of the parse so far: open tags minus close tags.
 pub(crate) fn depth(context: &Context) -> i64 {
@@ -195,7 +228,18 @@ fn run(state: &MatcherState, lexer: &mut Lexer<'_>, context: &mut Context) -> Op
     // lexer with no other matcher enabled in pure mode, and the `<?xml`
     // that follows would be reported as an unexpected character.
     if lexer.point().site.pos == 0 && lexer.remaining().starts_with('\u{FEFF}') {
+        let row = lexer.point().site.ri;
         lexer.advance_chars(1);
+        // The engine charges a display column for every character the
+        // cursor passes, and a byte-order mark is not one. Both other
+        // ports own the cursor arithmetic and simply do not charge it
+        // (`pnt.sI = bomLen` in `ts/src/xml.ts`, `pnt.SI = 3` in
+        // `go/xml.go`); here the row it sat on is remembered instead, and
+        // `discount_bom` gives the column back to every token minted
+        // there. See `BOM_ROW`.
+        context
+            .u
+            .insert(BOM_ROW.to_string(), Value::Number(row as f64));
     }
 
     let scan = scan(state, context, lexer.remaining());
@@ -207,7 +251,9 @@ fn run(state: &MatcherState, lexer: &mut Lexer<'_>, context: &mut Context) -> Op
             let to = to.min(rest.len());
             let start = base + rest[..from].chars().count();
             let end = base + rest[..to].chars().count();
-            Some(lexer.bad_span(code, start, end))
+            let mut token = lexer.bad_span(code, start, end);
+            discount_bom(context, &mut token.site);
+            Some(token)
         }
         Scan::Token {
             name,
@@ -216,7 +262,8 @@ fn run(state: &MatcherState, lexer: &mut Lexer<'_>, context: &mut Context) -> Op
             end,
         } => {
             let source = lexer.remaining()[..end].to_string();
-            let point = lexer.point();
+            let mut point = lexer.point();
+            discount_bom(context, &mut point.site);
             let token = lexer.token(name, tin, val, source.as_str(), point);
             lexer.advance_chars(source.chars().count());
             Some(token)

@@ -76,6 +76,61 @@ TypeScript. `MatcherState` holds only what is fixed when the plugin
 installs: the entity decoder, the two entity flags and the minted token
 identities.
 
+## Three UTF-16 habits of the canonical plugin, reproduced here
+
+TypeScript indexes UTF-16 code units and Rust indexes scalars, and three
+places in `ts/src/xml.ts` depend on the difference. Each is reproduced
+rather than corrected, because TypeScript is canonical, and each is
+pinned by a test in `tests/xml_test.rs`.
+
+1. **An entity declaration whose name starts outside the BMP declares
+   nothing.** `parseDoctypeEntities` tests `charCodeAt`, so the leading
+   surrogate of `<!ENTITY \u{1F600} "x">` is neither a NameStartChar nor
+   a NameChar and the declaration is skipped; a later `&\u{1F600};` is
+   then `undeclared_entity`. Every other name scanner in that file, the
+   matcher's own and `readNameInBody`, tests `codePointAt` and admits the
+   character, so element, attribute and `<!ATTLIST>` names take it. The
+   inconsistency looks like an oversight rather than a decision, and XML
+   1.0 [4] admits `#x10000-#xEFFFF`, so the declaration is well-formed
+   and ought to be recorded. Repair it in TypeScript first, then here.
+   `entity::read_declaration_name` is the narrow scanner;
+   `entity::read_name` stays the full production for every other site.
+   `an_astral_entity_declaration_declares_nothing` pins it. The Go port
+   reads runes and records the declaration, so this cannot be a shared
+   fixture row until Go is aligned too.
+
+2. **`\s` and `\b` are the JavaScript classes, spelled out.** The
+   `regex` crate reads `\s` as `\p{White_Space}`, which has U+0085 and
+   has not U+FEFF, while ECMA-262 is the reverse; and it reads `\b` as a
+   Unicode word boundary, while a JavaScript pattern without the `u`
+   flag uses ASCII word characters. The NDATA, ExternalID and
+   `standalone` patterns all run over DOCTYPE or XML-declaration text
+   that the document supplies, so both differences are reachable and
+   each changes a verdict. `entity::JS_SPACE` carries the class body and
+   the `standalone` pattern asks for `(?-u:\b)`.
+   `ported_patterns_use_the_javascript_character_classes` pins the rows.
+
+3. **A byte-order mark costs no display column.** See the section below.
+
+## A byte-order mark costs no display column
+
+The mark is an encoding signature, not document content, so the other
+two ports advance the source index past it and leave the column alone
+(`pnt.sI = bomLen`, `pnt.SI = 3`). Those ports own the cursor. This one
+hands the cursor to the engine, and `Lexer::advance_chars` charges a
+column for every character it passes, so `lex::discount_bom` takes that
+column back off the row the mark sat on, and `lib::check_doc_text`
+applies it to the one token the plugin reports against but does not mint.
+
+What it cannot reach is the engine's own `unexpected`. That is raised
+against a token the engine minted, and at end of source (`#ZZ`) the
+engine returns before any matcher runs, so `\u{FEFF}<a>` still reports
+column 5 where TypeScript and Go report 4. Repairing that needs a way to
+advance the engine's cursor without charging a column, which is a change
+to the parser crate, not to this one.
+`a_byte_order_mark_costs_no_column` pins both halves, so the day the
+engine gains that the test says so.
+
 ## An unpaired surrogate becomes U+FFFF, not U+FFFD
 
 `bom::not_a_scalar` carries the full reasoning. The short version: a

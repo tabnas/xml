@@ -14,6 +14,8 @@ num-dec-multi	<a>&#65;&#66;</a>	{"name":"a","localName":"a","attributes":{},"chi
 num-hex-single	<a>&#x41;</a>	{"name":"a","localName":"a","attributes":{},"children":["A"]}
 num-hex-multi	<a>&#x41;&#x42;</a>	{"name":"a","localName":"a","attributes":{},"children":["AB"]}
 num-hex-astral	<a>&#x1F600;</a>	{"name":"a","localName":"a","attributes":{},"children":["\uD83D\uDE00"]}
+num-dec-leading-zeros	<a>&#000000000000000000000065;</a>	{"name":"a","localName":"a","attributes":{},"children":["A"]}
+num-hex-leading-zeros	<a>&#x0000000000000000000041;</a>	{"name":"a","localName":"a","attributes":{},"children":["A"]}
 entity-in-attr	<a title="Tom &amp; Jerry"/>	{"name":"a","localName":"a","attributes":{"title":"Tom & Jerry"},"children":[]}
 num-in-attr	<a v="&#65;&#x42;"/>	{"name":"a","localName":"a","attributes":{"v":"AB"},"children":[]}
 unknown-rejected	<a>&unknown;</a>	ERROR:undeclared_entity

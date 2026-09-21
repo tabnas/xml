@@ -345,6 +345,354 @@ fn error_columns_count_characters_not_bytes() {
 }
 
 // ---------------------------------------------------------------------------
+// A byte-order mark costs no column
+//
+// The mark is an encoding signature, not document content, so it occupies
+// no display column: `ts/src/xml.ts` advances `pnt.sI` alone and
+// `go/xml.go` advances `pnt.SI` alone. This port hands the cursor to the
+// engine, which charges a column for every character it passes, so the
+// matcher gives that one back (`discount_bom` in `src/lex.rs`).
+//
+// Every column below was measured against the canonical implementation
+// (@tabnas/xml 0.7.7, whose published `src/xml.ts` is byte for byte the
+// file in `ts/src`) and against the Go port; the two agree on all of them.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_byte_order_mark_costs_no_column() {
+    // Each pair is the same document with and without the mark, and the
+    // same column is wanted for both.
+    for (label, src, code, col) in [
+        ("mismatched", "<a></b>", "xml_mismatched_tag", 4),
+        ("mismatched-bom", "\u{FEFF}<a></b>", "xml_mismatched_tag", 4),
+        ("top-level-text", "<a/>junk", "text_at_top_level", 5),
+        (
+            "top-level-text-bom",
+            "\u{FEFF}<a/>junk",
+            "text_at_top_level",
+            5,
+        ),
+        ("bad-entity", "<a>&#X26;</a>", "bad_entity_ref", 4),
+        (
+            "bad-entity-bom",
+            "\u{FEFF}<a>&#X26;</a>",
+            "bad_entity_ref",
+            4,
+        ),
+        ("unterminated", "<a><!-- x</a>", "unterminated_comment", 4),
+        (
+            "unterminated-bom",
+            "\u{FEFF}<a><!-- x</a>",
+            "unterminated_comment",
+            4,
+        ),
+        ("attr-lt", "<a b=\"<\"/>", "lt_in_attr_value", 1),
+        ("attr-lt-bom", "\u{FEFF}<a b=\"<\"/>", "lt_in_attr_value", 1),
+    ] {
+        let error = make()
+            .parse(src)
+            .expect_err(&format!("{label}: {src:?} parsed, expected a diagnostic"));
+        assert_eq!(error.code, code, "{label}: {src:?}");
+        assert_eq!(
+            (error.row, error.col),
+            (1, col),
+            "{label}: {src:?} reported {}:{}, want 1:{col}. A column one to the \
+             right of the want means the byte-order mark was charged a display \
+             column; TypeScript and Go charge it none.",
+            error.row,
+            error.col
+        );
+    }
+
+    // The mark also leaves the row alone, and a column on a later row was
+    // never affected: the engine resets it at the line ending.
+    for src in ["<a>\n  <b></c>\n</a>", "\u{FEFF}<a>\n  <b></c>\n</a>"] {
+        let error = make().parse(src).expect_err("a diagnostic");
+        assert_eq!((error.row, error.col), (2, 6), "{src:?}");
+    }
+
+    // The one diagnostic still a column to the right, and why: `unexpected`
+    // is raised by the ENGINE against a token the engine minted, and at end
+    // of source (`#ZZ`) no matcher runs at all, so `discount_bom` never
+    // sees it. TypeScript and Go both say 4 here, because there the plugin
+    // owns the cursor and never charged the column in the first place.
+    // Repairing it means giving the engine a way to advance without
+    // charging a column; until then this is the measured difference.
+    let error = make().parse("\u{FEFF}<a>").expect_err("a diagnostic");
+    assert_eq!(error.code, "unexpected");
+    assert_eq!((error.row, error.col), (1, 5));
+    let error = make().parse("<a>").expect_err("a diagnostic");
+    assert_eq!((error.row, error.col), (1, 4));
+}
+
+// ---------------------------------------------------------------------------
+// A `customEntities` replacement is coerced as JavaScript coerces it
+//
+// The canonical decoder returns the replacement straight out of a
+// `String.prototype.replace` callback, so JavaScript's `ToString` runs on
+// whatever the option bag held. Every want below was measured through
+// @tabnas/xml 0.7.7.
+// ---------------------------------------------------------------------------
+
+/// A parser whose `customEntities` maps `x` to `replacement`, installed
+/// through the loose option bag `plugin` takes, which is the only way a
+/// non-string replacement can arrive: [`XmlOptions::custom_entities`] is
+/// typed as strings.
+fn parser_with_custom_x(replacement: Value) -> Tabnas {
+    let mut options = Value::from_json(&serde_json::json!({"customEntities": {"x": null}}));
+    options
+        .as_object_mut()
+        .and_then(|bag| bag.get_mut("customEntities"))
+        .and_then(Value::as_object_mut)
+        .expect("the bag carries a customEntities object")
+        .insert("x".to_string(), replacement);
+    let mut parser = tabnas_jsonic::make();
+    parser
+        .use_plugin(plugin(), Some(options))
+        .expect("the plugin installs");
+    parser
+}
+
+#[test]
+fn custom_entity_replacements_coerce_as_javascript_does() {
+    let number = |n: f64| Value::Number(n);
+    for (label, replacement, want) in [
+        // An object has no `toString` of its own, so it is the bare tag.
+        (
+            "object",
+            Value::from_json(&serde_json::json!({"a": 1})),
+            "[object Object]",
+        ),
+        // `Array.prototype.toString` joins with commas, and a nested
+        // array joins in turn.
+        ("array", Value::from_json(&serde_json::json!([1, 2])), "1,2"),
+        (
+            "nested-array",
+            Value::from_json(&serde_json::json!([[1, 2], [3]])),
+            "1,2,3",
+        ),
+        // `join` renders null and undefined as nothing at all.
+        (
+            "array-holes",
+            Value::array(vec![Value::Null, Value::Undefined, number(1.0)]),
+            ",,1",
+        ),
+        ("null", Value::Null, "null"),
+        ("true", Value::Bool(true), "true"),
+        ("string", Value::String("plain".into()), "plain"),
+        // `Number::toString`, which is not Rust's `f64` formatting: no
+        // sign on zero, exponent form outside `(-6, 21]`, and the
+        // shortest round-tripping digits.
+        ("integer", number(7.0), "7"),
+        ("fraction", number(1.5), "1.5"),
+        ("negative-zero", number(-0.0), "0"),
+        ("exponent-high", number(1e21), "1e+21"),
+        ("exponent-low", number(1e-7), "1e-7"),
+        ("not-a-number", number(f64::NAN), "NaN"),
+        ("infinity", number(f64::INFINITY), "Infinity"),
+        ("negative-infinity", number(f64::NEG_INFINITY), "-Infinity"),
+    ] {
+        let value = parser_with_custom_x(replacement)
+            .parse("<a>&x;</a>")
+            .unwrap_or_else(|error| panic!("{label}: {error}"));
+        assert_eq!(
+            item(field(&value, "children"), 0),
+            &Value::String(want.to_string()),
+            "{label}"
+        );
+    }
+
+    // `undefined` is the one replacement the canonical callback never
+    // coerces: `undefined !== baseEntities[ref]` fails, so the name is
+    // declared (no `undeclared_entity`) and the reference is left in the
+    // text exactly as written.
+    let value = parser_with_custom_x(Value::Undefined)
+        .parse("<a>&x;</a>")
+        .expect("an undefined replacement is still a declaration");
+    assert_eq!(
+        item(field(&value, "children"), 0),
+        &Value::String("&x;".to_string())
+    );
+}
+
+// ---------------------------------------------------------------------------
+// An astral entity declaration declares nothing
+//
+// `parseDoctypeEntities` in `ts/src/xml.ts` is the one name scanner of the
+// canonical plugin that reads UTF-16 code units (`charCodeAt`), and a
+// surrogate is neither a NameStartChar nor a NameChar, so a declaration
+// whose name starts outside the BMP is skipped. Everything else in the
+// canonical plugin reads code points and admits the same character. That
+// looks like an oversight rather than a decision, and XML 1.0 [4] admits
+// `#x10000-#xEFFFF`, but TypeScript is canonical: see `src/entity.rs`,
+// `read_declaration_name`, and `AGENTS.md`.
+//
+// The Go port records the declaration (it reads runes), so this cannot be
+// a shared fixture row: it is a Go defect of the same shape, to be fixed
+// there.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn an_astral_entity_declaration_declares_nothing() {
+    // Skipped, so the reference to it is undeclared.
+    let error = parse("<!DOCTYPE a [<!ENTITY \u{1F600} \"x\">]><a>&\u{1F600};</a>")
+        .expect_err("the declaration is skipped, so the reference is undeclared");
+    assert_eq!(error.code, "undeclared_entity");
+
+    // A name that merely CONTAINS an astral character stops at it, so the
+    // declaration is malformed and nothing is recorded either.
+    let error = parse("<!DOCTYPE a [<!ENTITY a\u{1F600}b \"x\">]><a>&a;</a>")
+        .expect_err("the name stops at the astral character");
+    assert_eq!(error.code, "undeclared_entity");
+
+    // The scan resumes after the skipped declaration: a later one is
+    // still found.
+    let value = parse("<!DOCTYPE a [<!ENTITY \u{1F600} \"x\"><!ENTITY e \"v\">]><a>&e;</a>")
+        .expect("the ASCII declaration is still mined out");
+    assert_eq!(json(field(&value, "children")), r#"["v"]"#);
+
+    // A BMP name in the same position IS a declaration. The reference is
+    // left verbatim all the same: the decoder's reference pattern is
+    // ASCII in every port.
+    let value = parse("<!DOCTYPE a [<!ENTITY \u{4e2d} \"x\">]><a>&\u{4e2d};</a>")
+        .expect("a BMP name declares the entity");
+    assert_eq!(json(field(&value, "children")), "[\"&\u{4e2d};\"]");
+
+    // Element, attribute and `<!ATTLIST>` names are read by the
+    // code-point scanner and still admit an astral character.
+    let value = parse("<\u{1F600} a=\"1\"/>").expect("an astral element name parses");
+    assert_eq!(field(&value, "name"), &Value::String("\u{1F600}".into()));
+    let value = parse("<e \u{1F600}=\"1\"/>").expect("an astral attribute name parses");
+    assert_eq!(json(field(&value, "attributes")), "{\"\u{1F600}\":\"1\"}");
+    let value = parse("<!DOCTYPE d [<!ATTLIST d \u{1F600} CDATA \"v\">]><d/>")
+        .expect("an astral ATTLIST name parses");
+    assert_eq!(json(field(&value, "attributes")), "{\"\u{1F600}\":\"v\"}");
+}
+
+// ---------------------------------------------------------------------------
+// The ported patterns use the JavaScript character classes
+//
+// Three of this crate's five patterns came from JavaScript regular
+// expressions that spell `\s` or `\b`, and the `regex` crate reads both
+// as Unicode: `\s` is `\p{White_Space}`, which HAS U+0085 and has NOT
+// U+FEFF, the reverse of the ECMA-262 class; and `\b` is a Unicode word
+// boundary, while a JavaScript pattern without the `u` flag uses ASCII
+// word characters. All three patterns run over text a DOCTYPE or an XML
+// declaration supplies, so every difference below is reachable, and each
+// one changes a verdict rather than a position.
+//
+// Every want was measured through @tabnas/xml 0.7.7. The Go port spells
+// the same patterns in RE2, whose `\s` is ASCII-only, so it answers
+// differently again on the U+00A0 and U+FEFF rows: these cannot become
+// shared fixture rows until that is repaired there.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn ported_patterns_use_the_javascript_character_classes() {
+    // `None` is a clean parse; `Some(code)` the diagnostic wanted.
+    for (label, src, want) in [
+        // `(^|[\s"'])NDATA([\s"']|$)`: the separator before the NDATA
+        // notation of an unparsed entity declaration.
+        (
+            "ndata-space",
+            "<!DOCTYPE d [<!ENTITY e SYSTEM \"u\" NDATA n>]><d>&e;</d>",
+            Some("unparsed_entity_ref"),
+        ),
+        (
+            "ndata-nel",
+            "<!DOCTYPE d [<!ENTITY e SYSTEM \"u\"\u{85}NDATA n>]><d>&e;</d>",
+            None,
+        ),
+        (
+            "ndata-bom",
+            "<!DOCTYPE d [<!ENTITY e SYSTEM \"u\"\u{feff}NDATA n>]><d>&e;</d>",
+            Some("unparsed_entity_ref"),
+        ),
+        (
+            "ndata-nbsp",
+            "<!DOCTYPE d [<!ENTITY e SYSTEM \"u\"\u{a0}NDATA n>]><d>&e;</d>",
+            Some("unparsed_entity_ref"),
+        ),
+        // `(^|[\s>])(SYSTEM|PUBLIC)([\s"'])`: an external subset the
+        // processor never reads suspends the "Entity Declared" rule, so
+        // matching or not decides whether `&z;` is an error.
+        (
+            "external-id-space",
+            "<!DOCTYPE d SYSTEM \"u\"><d>&z;</d>",
+            None,
+        ),
+        (
+            "external-id-nel",
+            "<!DOCTYPE d\u{85}SYSTEM \"u\"><d>&z;</d>",
+            Some("undeclared_entity"),
+        ),
+        (
+            "external-id-bom",
+            "<!DOCTYPE d\u{feff}SYSTEM \"u\"><d>&z;</d>",
+            None,
+        ),
+        (
+            "external-id-nbsp",
+            "<!DOCTYPE d\u{a0}SYSTEM \"u\"><d>&z;</d>",
+            None,
+        ),
+        (
+            "external-id-tail-bom",
+            "<!DOCTYPE d SYSTEM\u{feff}\"u\"><d>&z;</d>",
+            None,
+        ),
+        (
+            "external-id-tail-nel",
+            "<!DOCTYPE d SYSTEM\u{85}\"u\"><d>&z;</d>",
+            Some("undeclared_entity"),
+        ),
+        // `\bstandalone\s*=\s*("yes"|'yes')`: `standalone="yes"` puts the
+        // "Entity Declared" rule back, so a match makes `&z;` an error.
+        (
+            "standalone-plain",
+            "<?xml standalone=\"yes\"?><!DOCTYPE d SYSTEM \"u\"><d>&z;</d>",
+            Some("undeclared_entity"),
+        ),
+        (
+            "standalone-no-boundary",
+            "<?xml astandalone=\"yes\"?><!DOCTYPE d SYSTEM \"u\"><d>&z;</d>",
+            None,
+        ),
+        // The boundary row: `e` then `standalone` is a word boundary in
+        // JavaScript, and inside one word to a Unicode `\b`.
+        (
+            "standalone-boundary-after-latin",
+            "<?xml a\u{e9}standalone=\"yes\"?><!DOCTYPE d SYSTEM \"u\"><d>&z;</d>",
+            Some("undeclared_entity"),
+        ),
+        (
+            "standalone-equals-bom",
+            "<?xml standalone\u{feff}=\u{feff}\"yes\"?><!DOCTYPE d SYSTEM \"u\"><d>&z;</d>",
+            Some("undeclared_entity"),
+        ),
+        (
+            "standalone-equals-nel",
+            "<?xml standalone\u{85}=\"yes\"?><!DOCTYPE d SYSTEM \"u\"><d>&z;</d>",
+            None,
+        ),
+        (
+            "standalone-equals-nbsp",
+            "<?xml standalone\u{a0}=\"yes\"?><!DOCTYPE d SYSTEM \"u\"><d>&z;</d>",
+            Some("undeclared_entity"),
+        ),
+    ] {
+        match (make().parse(src), want) {
+            (Ok(_), None) => {}
+            (Ok(value), Some(code)) => {
+                panic!("{label}: parsed as {}, want {code}", json(&value))
+            }
+            (Err(error), None) => panic!("{label}: {} , want a clean parse", error.code),
+            (Err(error), Some(code)) => assert_eq!(error.code, code, "{label}"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The embedded grammar is the grammar file
 // ---------------------------------------------------------------------------
 
