@@ -20,12 +20,28 @@
 /// so a stray control byte is still reported as an illegal XML character
 /// by the parser rather than vanishing in transcoding. A unit that is not
 /// a Unicode scalar value, in any of the encodings, becomes U+FFFF rather
-/// than U+FFFD. U+FFFF is excluded from `Char` and from `NameChar` exactly
-/// as a surrogate is, so a document carrying one is rejected here for the
-/// reason the other two runtimes reject it; U+FFFD is a legal name
-/// character, and folding to it would turn ill-formed documents into
-/// well-formed ones. The `not_a_scalar` function in this module carries
-/// the full reasoning.
+/// than U+FFFD, because U+FFFD is a legal `NameChar` and folding to it
+/// would turn ill-formed documents into well-formed ones, while U+FFFF is
+/// excluded from `NameChar` as a surrogate is.
+///
+/// What that buys is narrower than "the document is rejected", and the
+/// difference matters to a caller: **the substitute is refused in a NAME,
+/// and accepted anywhere else.** This parser checks character data for
+/// the illegal C0 controls (`check_chars`), not for the whole of `Char`,
+/// which the package states it does not implement. Writing the substitute
+/// as `U`, measured on this port:
+///
+/// ```text
+/// <dU/>                 ERROR xml_invalid_tag
+/// <d>U</d>              parses
+/// <d a="U"/>            parses
+/// <d><!-- U --></d>     parses
+/// <d><![CDATA[U]]></d>  parses
+/// ```
+///
+/// So `decode_bom` followed by `parse` is not full XML `Char` validation,
+/// and a caller who needs that has to add it. The `not_a_scalar` function
+/// in this module carries the full reasoning for the choice of U+FFFF.
 pub fn decode_bom(bytes: &[u8]) -> String {
     match bytes {
         [0x00, 0x00, 0xfe, 0xff, rest @ ..] => decode_utf32(rest, true),
