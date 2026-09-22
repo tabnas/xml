@@ -94,6 +94,26 @@ fn pure_mode_carries_only_the_xml_rules_and_starts_at_xml() {
             .map(|options| options.to_json()["embed"].clone()),
         Some(serde_json::Value::Bool(false))
     );
+
+    // The push edges the same TypeScript test reads off the debug model:
+    // `xml` pushes `element` and `content` pushes `child`. The engine
+    // carries them on the rule specs, so no debug plugin is needed to see
+    // them. Every fixture exercises the chain, but nothing else names it,
+    // and a grammar edit that reroutes a push while still parsing the
+    // corpus would go unremarked.
+    for (rule, pushed) in [("xml", "element"), ("content", "child")] {
+        let spec = parser
+            .rule_specs()
+            .into_iter()
+            .find(|spec| spec.name == rule)
+            .unwrap_or_else(|| panic!("the grammar carries a `{rule}` rule"));
+        let pushes =
+            |alts: &[tabnas::AltSpec]| alts.iter().any(|alt| alt.p.as_deref() == Some(pushed));
+        assert!(
+            pushes(&spec.open) || pushes(&spec.close),
+            "`{rule}` does not push `{pushed}`"
+        );
+    }
 }
 
 #[test]
