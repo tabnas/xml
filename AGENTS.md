@@ -100,15 +100,20 @@ builds them first.
 2. The shared fixtures in `test/spec/*.tsv` are the parity contract: all
    three suites run them and must stay green. The loaders unescape `\n`
    `\r` `\t` `\\` in the input column identically; the expected column is
-   raw JSON or `ERROR` / `ERROR:<code>`. **Each runner finds the directory
-   its own way:** the TS runner (`ts/test/xml-spec.test.ts`) walks up from
-   `__dirname`, since it runs out of `dist-test/`; the Go runner
-   (`go/xml_test.go`, `specDir()`) resolves `../test/spec`; and the Rust
-   runner (`rs/tests/parity_test.rs`) resolves it from
-   `CARGO_MANIFEST_DIR`.
-3. **All three** runners auto-discover every `.tsv` under `test/spec/` —
-   the TS runner by `readdirSync`, the Go runner by `filepath.Glob` in
-   `TestSpec`, and the Rust runner by `Runner::dir` in
+   raw JSON or `ERROR` / `ERROR:<code>`. **No runner writes a relative path
+   to the directory.** All three call the same `@tabnas/support` helper,
+   which walks up until it finds `test/spec`, and only the starting point
+   differs: `findSpecDir(__dirname)` in `ts/test/xml-spec.test.ts`, since
+   that suite runs out of `dist-test/`; `support.FindSpecDir("")` in
+   `go/xml_test.go`, where the empty string means the working directory;
+   and `find_spec_dir(CARGO_MANIFEST_DIR)` in `rs/tests/common/mod.rs`,
+   which is what `rs/tests/parity_test.rs` calls `spec_dir()`. There is no
+   `specDir()` in this repository.
+3. **All three** runners auto-discover every `.tsv` under `test/spec/`,
+   and none of them lists the directory itself: discovery is the shared
+   runner's own `dir` step, reached as `makeRunner(...).dir(...)` in
+   `ts/test/xml-spec.test.ts`, `support.Runner{...}.Dir(t, dir)` in
+   `go/xml_test.go` and `runner().dir(spec_dir())` in
    `rs/tests/parity_test.rs`. Dropping a file in covers all three; there
    is nothing to register by hand.
    (The Go side used to name each file explicitly and that list went stale:
