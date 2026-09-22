@@ -622,13 +622,13 @@ the failing token; the hint text for each lives beside it in the catalogue.
 | `unterminated_cdata` | `unterminated CDATA section: {src}` | yes |
 | `unterminated_pi` | `unterminated processing instruction: {src}` | yes |
 | `unterminated_doctype` | `unterminated DOCTYPE declaration: {src}` | yes |
-| `comment_double_dash` | `comment body cannot contain "--"` | – |
-| `cdata_terminator_in_text` | `character data cannot contain "]]>"` | – |
-| `pi_target_invalid` | `processing instruction target is missing or invalid` | – |
-| `lt_in_attr_value` | `"<" is not allowed in an attribute value` | – |
+| `comment_double_dash` | `comment body cannot contain "--"` | yes |
+| `cdata_terminator_in_text` | `character data cannot contain "]]>"` | yes |
+| `pi_target_invalid` | `processing instruction target is missing or invalid` | yes |
+| `lt_in_attr_value` | `"<" is not allowed in an attribute value` | yes |
 | `bad_entity_ref` | `malformed entity reference (need &name; or &#NNN; or &#xHHH;)` | yes |
-| `duplicate_attribute` | `duplicate attribute name in tag` | – |
-| `invalid_xml_char` | `illegal control character in XML data` | – |
+| `duplicate_attribute` | `duplicate attribute name in tag` | yes |
+| `invalid_xml_char` | `illegal control character in XML data` | yes |
 | `reserved_namespace` | `invalid use of a reserved namespace prefix or URI` | yes |
 | `unbound_prefix` | `element or attribute uses an undeclared namespace prefix` | yes |
 | `invalid_namespace_uri` | `namespace name cannot contain white space` | yes |
@@ -637,23 +637,22 @@ the failing token; the hint text for each lives beside it in the catalogue.
 | `external_entity_in_attr` | `attribute value cannot reference an external entity` | yes |
 | `text_at_top_level` | `character data is not allowed outside the root element` | yes |
 
-### Known coverage gap
+### The fixture column, and what keeps it honest
 
-14 of the 20 declared codes are exercised by a fixture. **Six are declared but
-have no fixture at all:**
+Every one of the 20 declared codes is pinned by at least one
+`ERROR:<code>` row in `test/spec`, which all three runners discover, so
+losing or renaming a code fails a suite in every runtime. The `Fixture` column above is
+therefore `yes` throughout; the gate that keeps it so is
+`every_declared_code_is_pinned_by_a_fixture` in
+`rs/tests/error_codes_test.rs`, and it is the one to believe.
 
-- `cdata_terminator_in_text`
-- `comment_double_dash`
-- `duplicate_attribute`
-- `invalid_xml_char`
-- `lt_in_attr_value`
-- `pi_target_invalid`
-
-Each is reachable — they are raised from real branches in both runtimes — but
-nothing pins the code, so either runtime could change or lose one without a
-test going red. Adding a `test/spec` row for each is a genuinely useful
-contribution; do it as its own change, since it is test work rather than
-documentation.
+This section previously named six codes as having no fixture at all. All
+six had been covered since, and the count sat in prose where nothing
+could correct it. Three more gates in that file now read the
+canonical `error` table out of `ts/src/xml.ts` and hold
+`tabnas.plugin.json`, the `hint` table and the catalogue an installed
+parser carries to it, so "the two catalogues are exactly in step" is
+executed rather than asserted here.
 
 ## Untrusted input
 

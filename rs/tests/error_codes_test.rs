@@ -7,7 +7,8 @@
 // here and not there, means the two runtimes reject the same document for
 // different reasons, which is the one thing the shared fixtures cannot
 // catch on their own: a fixture row pins `ERROR:<code>` only for the
-// codes somebody wrote a row for, and six of the twenty have no row.
+// codes somebody wrote a row for, so a code nobody wrote a row for could
+// change name or wording with every suite still green.
 //
 // So the canonical TypeScript source and the plugin descriptor are both
 // read, and the installed catalogue is read back off a parser rather than
@@ -235,9 +236,8 @@ fn the_port_installs_exactly_the_canonical_codes() {
 /// The message template itself, not only the name. The canonical table
 /// is read out of `ts/src/xml.ts` and compared entry for entry, so a
 /// placeholder dropped on one side, or a rewording, fails here. The
-/// shared fixtures cannot stand in for this: their `msg` column pins a
-/// substring for the handful of rows that carry one, and six of the
-/// twenty codes have no row at all.
+/// shared fixtures cannot stand in for this: a row pins the CODE, and
+/// only the rows carrying a `msg` cell pin any of the text.
 ///
 /// One of the twenty, `unterminated_comment`, is also a base code the
 /// engine declares, and the engine's wording currently happens to match.
@@ -262,4 +262,32 @@ fn the_port_installs_the_canonical_message_templates() {
             "the {code} message differs from the canonical one in ts/src/xml.ts"
         );
     }
+}
+
+/// Every declared code is pinned by at least one shared fixture row, so
+/// a code that stops being raised fails a suite rather than becoming a
+/// name nothing produces. The root `AGENTS.md` carried this as a count
+/// in prose, and the count had gone stale in the safe direction: it
+/// named six codes as unpinned that fixture rows had since covered.
+#[test]
+fn every_declared_code_is_pinned_by_a_fixture() {
+    let spec = repo_root().join("test").join("spec");
+    let mut rows = String::new();
+    for entry in fs::read_dir(&spec).expect("the spec directory lists") {
+        let path = entry.expect("a directory entry").path();
+        if path.extension().is_some_and(|ext| ext == "tsv") {
+            rows.push_str(&fs::read_to_string(&path).expect("a fixture is readable"));
+        }
+    }
+    assert!(!rows.is_empty(), "no fixtures were read from {spec:?}");
+    let unpinned: Vec<String> = descriptor_codes()
+        .into_iter()
+        .filter(|code| !rows.contains(&format!("ERROR:{code}")))
+        .collect();
+    assert!(
+        unpinned.is_empty(),
+        "these declared codes are pinned by no fixture row: {unpinned:?}. \
+         Add a row to test/spec, which every runtime discovers, rather than \
+         recording the gap in prose"
+    );
 }
