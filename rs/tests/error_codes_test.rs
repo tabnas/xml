@@ -307,23 +307,31 @@ fn the_port_installs_exactly_the_canonical_codes() {
         "the port does not install these canonical codes: {missing:?}"
     );
 
-    // An inherited base code is exempt only while it is UNCHANGED. The
-    // filter used to exempt it on the name alone, so the port could
-    // override the message or the hint of any code jsonic declares --
-    // `unexpected`, which this parser does raise -- and pass every test
-    // in this file: the template comparison below walks the canonical
-    // codes, and an override of an inherited one is not among them.
-    let extra: BTreeSet<&String> = catalogues
-        .error
-        .keys()
-        .filter(|code| {
-            !canonical.contains(*code)
-                && catalogues.base_error.get(*code) != catalogues.error.get(*code)
-        })
+    // Outside the canonical twenty, the installed catalogue must equal
+    // the inherited one -- ENTRY FOR ENTRY, IN BOTH DIRECTIONS.
+    //
+    // Three failures, one rule. Walking only the installed keys catches
+    // a code ADDED under no canonical name, and (once values rather than
+    // names are compared) one OVERRIDDEN. It cannot catch a base entry
+    // DELETED: a code the plugin drops is absent from the installed map,
+    // so there is no key to walk, and this parser would raise
+    // `unexpected` carrying no message at all. Comparing over the UNION
+    // of the two key sets is what makes all three the same question.
+    let noncanonical = |map: &std::collections::HashMap<String, String>| -> BTreeSet<String> {
+        map.keys()
+            .filter(|code| !canonical.contains(*code))
+            .cloned()
+            .collect()
+    };
+    let extra: BTreeSet<String> = noncanonical(&catalogues.error)
+        .union(&noncanonical(&catalogues.base_error))
+        .filter(|code| catalogues.base_error.get(*code) != catalogues.error.get(*code))
+        .cloned()
         .collect();
     assert!(
         extra.is_empty(),
-        "the port installs or overrides codes the canonical `error` table does not declare: {extra:?}"
+        "outside the canonical table, the installed `error` catalogue differs from the \
+         inherited one (added, overridden or REMOVED): {extra:?}"
     );
 
     let unhinted: BTreeSet<&String> = canonical
@@ -335,17 +343,16 @@ fn the_port_installs_exactly_the_canonical_codes() {
         "these canonical codes are installed with no hint: {unhinted:?}"
     );
 
-    let extra_hints: BTreeSet<&String> = catalogues
-        .hint
-        .keys()
-        .filter(|code| {
-            !canonical.contains(*code)
-                && catalogues.base_hint.get(*code) != catalogues.hint.get(*code)
-        })
+    // The same rule for hints, over the same union, for the same reason.
+    let extra_hints: BTreeSet<String> = noncanonical(&catalogues.hint)
+        .union(&noncanonical(&catalogues.base_hint))
+        .filter(|code| catalogues.base_hint.get(*code) != catalogues.hint.get(*code))
+        .cloned()
         .collect();
     assert!(
         extra_hints.is_empty(),
-        "the port installs or overrides hints for codes it does not declare: {extra_hints:?}"
+        "outside the canonical table, the installed `hint` catalogue differs from the \
+         inherited one (added, overridden or REMOVED): {extra_hints:?}"
     );
 }
 
