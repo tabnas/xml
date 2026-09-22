@@ -1,8 +1,9 @@
 # Agents Guide — shared spec fixtures
 
-`spec/*.tsv` holds the cross-runtime conformance fixtures. Both runtimes
-auto-discover and run **every** file in this directory, so a change here
-affects TypeScript and Go together — edit with that in mind.
+`spec/*.tsv` holds the cross-runtime conformance fixtures. All three
+runtimes auto-discover and run **every** file in this directory, so a
+change here affects TypeScript, Go and Rust together. Edit with that in
+mind.
 
 ## Format
 
@@ -70,12 +71,13 @@ Behavioural cases still belong here in `spec/`.
 ## Rules
 
 - Prefer adding a fixture here over a one-off in-language assertion when a
-  case is expressible as input → output. That is what keeps the two runtimes
+  case is expressible as input → output. That is what keeps the runtimes
   honest against each other.
-- TypeScript is canonical. If the two runtimes disagree, the TS behaviour is
-  the expected value — unless Go has exposed a genuine TS defect, in which
-  case fix TS first and pin the corrected behaviour here.
-- A new fixture must pass in BOTH runtimes before it counts:
-  `go test ./...` from `go/`, and **`npm run build && npm test`** from `ts/`.
-  Plain `npm test` runs the previously compiled `dist-test/`, so it can pass
-  without ever loading a newly added fixture.
+- TypeScript is canonical. If the runtimes disagree, the TS behaviour is
+  the expected value — unless a port has exposed a genuine TS defect, in
+  which case fix TS first and pin the corrected behaviour here.
+- A new fixture must pass in ALL THREE runtimes before it counts:
+  `go test ./...` from `go/`, `cargo test --all-targets` from `rs/`, and
+  **`npm run build && npm test`** from `ts/`. Plain `npm test` runs the
+  previously compiled `dist-test/`, so it can pass without ever loading a
+  newly added fixture.
