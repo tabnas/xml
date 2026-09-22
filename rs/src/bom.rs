@@ -19,8 +19,13 @@
 /// becomes the character with that code, as the canonical decoder does,
 /// so a stray control byte is still reported as an illegal XML character
 /// by the parser rather than vanishing in transcoding. A unit that is not
-/// a Unicode scalar value, in any of the encodings, becomes U+FFFF: see
-/// [`not_a_scalar`] for why that character and not U+FFFD.
+/// a Unicode scalar value, in any of the encodings, becomes U+FFFF rather
+/// than U+FFFD. U+FFFF is excluded from `Char` and from `NameChar` exactly
+/// as a surrogate is, so a document carrying one is rejected here for the
+/// reason the other two runtimes reject it; U+FFFD is a legal name
+/// character, and folding to it would turn ill-formed documents into
+/// well-formed ones. The `not_a_scalar` function in this module carries
+/// the full reasoning.
 pub fn decode_bom(bytes: &[u8]) -> String {
     match bytes {
         [0x00, 0x00, 0xfe, 0xff, rest @ ..] => decode_utf32(rest, true),
