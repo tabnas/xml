@@ -277,6 +277,55 @@ fn the_descriptor_lists_the_canonical_codes() {
     );
 }
 
+/// The COUNT the guide states, and the table it states it about.
+///
+/// Every comparison in this file is relative: two sets, two lengths, one
+/// against another. Add a code to TypeScript, Rust, the descriptor and a
+/// fixture in one change and all of them stay green -- while
+/// `../AGENTS.md` goes on saying "every one of the 20 declared codes"
+/// and listing 20 rows, which is the prose-count drift this file exists
+/// to end, surviving in the one place nothing measured.
+///
+/// So the number is read out of the guide rather than written here, and
+/// the rows of its table are read with it: a code added to the code and
+/// not to the page fails, and so does a page whose sentence and table
+/// disagree with each other.
+#[test]
+fn the_guide_states_the_catalogue_it_documents() {
+    let guide = fs::read_to_string(repo_root().join("AGENTS.md")).expect("AGENTS.md is readable");
+    let canonical: BTreeSet<String> = canonical_table_keys("error: {").into_iter().collect();
+
+    let at = guide
+        .find("Every one of the ")
+        .expect("AGENTS.md states how many codes are declared");
+    let stated: usize = guide[at + "Every one of the ".len()..]
+        .split_whitespace()
+        .next()
+        .expect("a number follows")
+        .parse()
+        .expect("the stated count is a number");
+    assert_eq!(
+        stated,
+        canonical.len(),
+        "AGENTS.md says {stated} declared codes; ts/src/xml.ts declares {}",
+        canonical.len()
+    );
+
+    // The rows of the table that sentence is about. A row is
+    // `| `code` | `message` | yes |`, so the first backticked cell of a
+    // three-column row naming a canonical code is one.
+    let rows: BTreeSet<String> = guide
+        .lines()
+        .filter(|line| line.starts_with("| `") && line.matches('|').count() == 4)
+        .filter_map(|line| line.split('`').nth(1).map(str::to_string))
+        .filter(|name| canonical.contains(name))
+        .collect();
+    assert_eq!(
+        rows, canonical,
+        "the error-code table in AGENTS.md and the `error` table in ts/src/xml.ts list different codes"
+    );
+}
+
 /// Every declared code carries a hint on the canonical side, which is the
 /// property `../AGENTS.md` states and the reason the port carries two
 /// tables rather than one.

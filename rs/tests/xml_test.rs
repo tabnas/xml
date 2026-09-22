@@ -109,9 +109,14 @@ fn pure_mode_carries_only_the_xml_rules_and_starts_at_xml() {
             .unwrap_or_else(|| panic!("the grammar carries a `{rule}` rule"));
         let pushes =
             |alts: &[tabnas::AltSpec]| alts.iter().any(|alt| alt.p.as_deref() == Some(pushed));
+        // `open` ALONE, as the TypeScript test this mirrors checks. A
+        // push moved to `close` still parses the corpus and still
+        // satisfied an `open || close` assertion, while the rule chain
+        // no longer matched the canonical phase -- which is the whole
+        // property this case exists to pin.
         assert!(
-            pushes(&spec.open) || pushes(&spec.close),
-            "`{rule}` does not push `{pushed}`"
+            pushes(&spec.open),
+            "`{rule}` does not push `{pushed}` from an OPEN alternative"
         );
     }
 }
