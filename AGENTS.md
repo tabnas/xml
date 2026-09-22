@@ -651,11 +651,27 @@ therefore `yes` throughout; the gate that keeps it so is
 `every_declared_code_is_pinned_by_a_fixture` in
 `rs/tests/error_codes_test.rs`, and it is the one to believe.
 
+The column itself is executed as well as the claim behind it. The table
+above is read whole, and each row's `Fixture` cell is compared against
+the same census, so a cell edited away from `yes` fails rather than
+quietly advertising coverage the fixtures do not give.
+
 This section previously named six codes as having no fixture at all. All
 six had been covered since, and the count sat in prose where nothing
 could correct it. Three more gates in that file read the canonical
 `error` table out of `ts/src/xml.ts` and hold `tabnas.plugin.json`, the
 `hint` table and the catalogue an installed parser carries to it.
+
+**The Rust gate does not run for every file those gates read.**
+`.github/workflows/rust.yml` filters both its `push` and `pull_request`
+triggers by path, and neither list names `tabnas.plugin.json` or this
+file -- yet `the_descriptor_lists_the_canonical_codes` reads the first
+and `the_guide_states_the_catalogue_it_documents` reads the second. A
+change confined to either can therefore break a gate that never runs.
+Both paths belong in both lists. `.github/workflows/` is applied by a
+maintainer under ADR-8 and is not writable from an agent session, so
+this is recorded rather than fixed, alongside the other workflow items
+on [tabnas/admin#83](https://github.com/tabnas/admin/issues/83).
 
 **Those gates compare TypeScript with RUST.** They never read `go/xml.go`
 and never install the Go parser, so a Go-only drift -- a reworded

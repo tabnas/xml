@@ -144,9 +144,16 @@ fn canonical_error_table() -> BTreeMap<String, String> {
 /// said the same thing.
 ///
 /// A rewording, or a dropped `{placeholder}`, reached a user with every
-/// test green, and the fixtures could not catch it either -- a row pins
-/// the CODE, and only the rows carrying a `msg` cell pin any text at all,
-/// none of it hint text.
+/// test green, and the fixtures could not catch most of it either -- a row
+/// pins the CODE, and only the rows carrying a `msg` cell pin any text at
+/// all. Fixture coverage of HINT text is PARTIAL rather than absent:
+/// `test/spec/errors.tsv` carries two rows whose `msg` is a hint
+/// substring, `mismatched-close-hint-message` and
+/// `unbound-prefix-hint-message`, and all three runners compare that cell
+/// against the rendered diagnostic, so rewording either hint far enough to
+/// lose the substring does fail the shared suites. Two of twenty, by
+/// substring, is the reason this comparison exists, not a reason it does
+/// not.
 ///
 /// The extraction is the same shape as the `error` one, reading from the
 /// first backtick after the colon to the closing backtick and joining the
@@ -331,14 +338,40 @@ fn the_guide_states_the_catalogue_it_documents() {
     // Duplicates before anything else, because every comparison below is
     // between sets and a set cannot report one.
     let mut seen = BTreeSet::new();
-    for (code, _) in &rows {
+    for (code, _, _) in &rows {
         assert!(
             seen.insert(code.clone()),
             "the error-code table in AGENTS.md lists `{code}` more than once"
         );
     }
 
-    let documented: BTreeMap<String, String> = rows.into_iter().collect();
+    // The `Fixture` column, against the census that makes it true. The
+    // page states outright that the gate keeps this column `yes`
+    // throughout, and reading only the code and message cells left that
+    // claim unmeasured: a cell hand-edited to anything else stayed green
+    // here, and green in the census too, because the fixture still
+    // existed. It is the same defect as the one that made the whole
+    // table green -- a column the page advertises and nothing reads.
+    let pinned = codes_pinned_by_fixtures();
+    for (code, _, fixture) in &rows {
+        let want = if pinned.contains(code) { "yes" } else { "no" };
+        assert_eq!(
+            fixture,
+            want,
+            "AGENTS.md says the Fixture column for `{code}` is {fixture:?}; \
+             test/spec pins it {}",
+            if "yes" == want {
+                "as claimed"
+            } else {
+                "nowhere"
+            }
+        );
+    }
+
+    let documented: BTreeMap<String, String> = rows
+        .into_iter()
+        .map(|(code, message, _)| (code, message))
+        .collect();
     assert_eq!(
         documented.keys().collect::<Vec<_>>(),
         canonical.keys().collect::<Vec<_>>(),
@@ -354,7 +387,7 @@ fn the_guide_states_the_catalogue_it_documents() {
 }
 
 /// The rows of the error-code table in `../AGENTS.md`, in page order, as
-/// (code, message).
+/// (code, message, fixture).
 ///
 /// Scoped to that one table by its header row, because the page carries
 /// other three-column tables whose first cell is a code span -- which is
@@ -363,7 +396,7 @@ fn the_guide_states_the_catalogue_it_documents() {
 /// the scope every row must parse: a line that is not
 /// `| `code` | `message` | ... |` is a fault in the table, not a line to
 /// skip past.
-fn guide_error_rows(guide: &str) -> Vec<(String, String)> {
+fn guide_error_rows(guide: &str) -> Vec<(String, String, String)> {
     const HEADER: &str = "| Code | Message | Fixture |";
     let mut lines = guide.lines();
     lines
@@ -388,7 +421,12 @@ fn guide_error_rows(guide: &str) -> Vec<(String, String)> {
             5,
             "the error-code table in AGENTS.md carries a row that is not three cells: {line}"
         );
-        rows.push((code_span(cells[1], line), code_span(cells[2], line)));
+        rows.push((
+            code_span(cells[1], line),
+            code_span(cells[2], line),
+            // The `Fixture` cell is plain text, not a code span.
+            cells[3].to_string(),
+        ));
     }
     panic!("the error-code table in AGENTS.md runs to the end of the page");
 }
@@ -560,6 +598,25 @@ fn the_port_installs_the_canonical_hint_templates() {
 /// named six codes as unpinned that fixture rows had since covered.
 #[test]
 fn every_declared_code_is_pinned_by_a_fixture() {
+    let expected = codes_pinned_by_fixtures();
+    let unpinned: Vec<String> = descriptor_codes()
+        .into_iter()
+        .filter(|code| !expected.contains(code))
+        .collect();
+    assert!(
+        unpinned.is_empty(),
+        "these declared codes are pinned by no fixture row: {unpinned:?}. \
+         Add a row to test/spec, which every runtime discovers, rather than \
+         recording the gap in prose"
+    );
+}
+
+/// Every code pinned by an `ERROR:<code>` row in `test/spec`.
+///
+/// Shared by the census above and by the guide's `Fixture` column, so the
+/// page's claim of coverage is measured against the same scan that makes
+/// it true rather than against a second reading of the same files.
+fn codes_pinned_by_fixtures() -> BTreeSet<String> {
     let spec = repo_root().join("test").join("spec");
     // The EXPECTED cell, not the row. A substring search over the whole
     // line counts a code named in the test's name, its XML input, its
@@ -599,16 +656,7 @@ fn every_declared_code_is_pinned_by_a_fixture() {
         !expected.is_empty(),
         "no ERROR: expectations were read from {spec:?}"
     );
-    let unpinned: Vec<String> = descriptor_codes()
-        .into_iter()
-        .filter(|code| !expected.contains(code))
-        .collect();
-    assert!(
-        unpinned.is_empty(),
-        "these declared codes are pinned by no fixture row: {unpinned:?}. \
-         Add a row to test/spec, which every runtime discovers, rather than \
-         recording the gap in prose"
-    );
+    expected
 }
 
 /// The index of the `expected` column, read from a fixture's own header.
