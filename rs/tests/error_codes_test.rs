@@ -277,7 +277,8 @@ fn the_descriptor_lists_the_canonical_codes() {
     );
 }
 
-/// The COUNT the guide states, and the table it states it about.
+/// The COUNT the guide states, the ROWS of the table it states it about,
+/// and the MESSAGE each of those rows advertises.
 ///
 /// Every comparison in this file is relative: two sets, two lengths, one
 /// against another. Add a code to TypeScript, Rust, the descriptor and a
@@ -287,13 +288,21 @@ fn the_descriptor_lists_the_canonical_codes() {
 /// to end, surviving in the one place nothing measured.
 ///
 /// So the number is read out of the guide rather than written here, and
-/// the rows of its table are read with it: a code added to the code and
-/// not to the page fails, and so does a page whose sentence and table
-/// disagree with each other.
+/// the table is read WHOLE: every row between its header and the blank
+/// line after it, with nothing filtered away. The first draft of this
+/// gate kept only the rows naming a canonical code, which made an
+/// obsolete, misspelled or duplicated row invisible -- the unknown name
+/// was dropped before the comparison and the set swallowed the
+/// duplicate. A table has to be compared as it stands, not as its own
+/// intersection with the answer.
+///
+/// The message cell is read with the code cell, for the same reason: a
+/// canonical message edited in TypeScript and Rust and left stale on the
+/// page is drift that a comparison of code names alone cannot see.
 #[test]
 fn the_guide_states_the_catalogue_it_documents() {
     let guide = fs::read_to_string(repo_root().join("AGENTS.md")).expect("AGENTS.md is readable");
-    let canonical: BTreeSet<String> = canonical_table_keys("error: {").into_iter().collect();
+    let canonical = canonical_error_table();
 
     let at = guide
         .find("Every one of the ")
@@ -311,19 +320,87 @@ fn the_guide_states_the_catalogue_it_documents() {
         canonical.len()
     );
 
-    // The rows of the table that sentence is about. A row is
-    // `| `code` | `message` | yes |`, so the first backticked cell of a
-    // three-column row naming a canonical code is one.
-    let rows: BTreeSet<String> = guide
-        .lines()
-        .filter(|line| line.starts_with("| `") && line.matches('|').count() == 4)
-        .filter_map(|line| line.split('`').nth(1).map(str::to_string))
-        .filter(|name| canonical.contains(name))
-        .collect();
+    let rows = guide_error_rows(&guide);
     assert_eq!(
-        rows, canonical,
+        rows.len(),
+        stated,
+        "AGENTS.md says {stated} declared codes and its own table carries {} rows",
+        rows.len()
+    );
+
+    // Duplicates before anything else, because every comparison below is
+    // between sets and a set cannot report one.
+    let mut seen = BTreeSet::new();
+    for (code, _) in &rows {
+        assert!(
+            seen.insert(code.clone()),
+            "the error-code table in AGENTS.md lists `{code}` more than once"
+        );
+    }
+
+    let documented: BTreeMap<String, String> = rows.into_iter().collect();
+    assert_eq!(
+        documented.keys().collect::<Vec<_>>(),
+        canonical.keys().collect::<Vec<_>>(),
         "the error-code table in AGENTS.md and the `error` table in ts/src/xml.ts list different codes"
     );
+    for (code, message) in &canonical {
+        assert_eq!(
+            documented.get(code).map(String::as_str),
+            Some(message.as_str()),
+            "AGENTS.md documents a different message for `{code}` than ts/src/xml.ts raises"
+        );
+    }
+}
+
+/// The rows of the error-code table in `../AGENTS.md`, in page order, as
+/// (code, message).
+///
+/// Scoped to that one table by its header row, because the page carries
+/// other three-column tables whose first cell is a code span -- which is
+/// what the discarded "only rows naming a canonical code" filter was
+/// really doing, at the cost of hiding every wrong row as well. Inside
+/// the scope every row must parse: a line that is not
+/// `| `code` | `message` | ... |` is a fault in the table, not a line to
+/// skip past.
+fn guide_error_rows(guide: &str) -> Vec<(String, String)> {
+    const HEADER: &str = "| Code | Message | Fixture |";
+    let mut lines = guide.lines();
+    lines
+        .find(|line| line.trim() == HEADER)
+        .unwrap_or_else(|| panic!("AGENTS.md carries the error-code table under `{HEADER}`"));
+    let separator = lines
+        .next()
+        .expect("a separator row follows the error-code table's header");
+    assert!(
+        separator.starts_with("|---"),
+        "the error-code table's header is not followed by a separator row: {separator}"
+    );
+
+    let mut rows = Vec::new();
+    for line in lines {
+        if !line.starts_with('|') {
+            return rows;
+        }
+        let cells: Vec<&str> = line.split('|').map(str::trim).collect();
+        assert_eq!(
+            cells.len(),
+            5,
+            "the error-code table in AGENTS.md carries a row that is not three cells: {line}"
+        );
+        rows.push((code_span(cells[1], line), code_span(cells[2], line)));
+    }
+    panic!("the error-code table in AGENTS.md runs to the end of the page");
+}
+
+/// A table cell's backticked content. Both compared columns are code
+/// spans on the page, so a bare cell is drift rather than a spelling
+/// variant, and saying so is the point of reading the table whole.
+fn code_span(cell: &str, line: &str) -> String {
+    cell.strip_prefix('`')
+        .and_then(|rest| rest.strip_suffix('`'))
+        .unwrap_or_else(|| panic!("a cell of the error-code table is not a code span: {line}"))
+        .to_string()
 }
 
 /// Every declared code carries a hint on the canonical side, which is the
