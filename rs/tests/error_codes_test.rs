@@ -439,8 +439,7 @@ fn every_declared_code_is_pinned_by_a_fixture() {
     // line counts a code named in the test's name, its XML input, its
     // options or its message column, so the gate could stay green after
     // the only assertion of that code was deleted -- which is the state
-    // it exists to report. Column 3 (`name input expected opts [msg]`),
-    // compared exactly.
+    // it exists to report. The `expected` cell, compared exactly.
     let mut expected: BTreeSet<String> = BTreeSet::new();
     for entry in fs::read_dir(&spec).expect("the spec directory lists") {
         let path = entry.expect("a directory entry").path();
@@ -450,13 +449,21 @@ fn every_declared_code_is_pinned_by_a_fixture() {
         // Comment lines are dropped. A code named in a fixture's
         // legend is prose, and counting it would make this gate agree
         // with the prose it replaces rather than with the rows.
-        for line in fs::read_to_string(&path)
-            .expect("a fixture is readable")
+        //
+        // The column is found by NAME, from the file's own header, as the
+        // shared runners find it. A fixed index agrees with every file in
+        // this repository today and would quietly read the wrong cell in
+        // one whose columns were reordered -- reporting pinned codes as
+        // unpinned, which is a false report rather than a missed one.
+        let text = fs::read_to_string(&path).expect("a fixture is readable");
+        let at = expected_column(&text)
+            .unwrap_or_else(|| panic!("{path:?} has no `expected` column in its header"));
+        for line in text
             .lines()
             .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
         {
             let fields: Vec<&str> = line.split('\t').collect();
-            let Some(cell) = fields.get(2) else { continue };
+            let Some(cell) = fields.get(at) else { continue };
             if let Some(code) = cell.trim().strip_prefix("ERROR:") {
                 expected.insert(code.to_string());
             }
@@ -476,4 +483,33 @@ fn every_declared_code_is_pinned_by_a_fixture() {
          Add a row to test/spec, which every runtime discovers, rather than \
          recording the gap in prose"
     );
+}
+
+/// The index of the `expected` column, read from a fixture's own header.
+///
+/// The header is the first comment line and names the columns
+/// (`# name\tinput\texpected\topts\t[msg]`), which is how the shared
+/// runners resolve them. Reading it rather than counting to three means a
+/// file whose columns are reordered is still read correctly, instead of
+/// this census inspecting another cell and reporting covered codes as
+/// unpinned.
+fn expected_column(text: &str) -> Option<usize> {
+    let header = text.lines().find(|line| line.starts_with('#'))?;
+    header
+        .trim_start_matches('#')
+        .split('\t')
+        .position(|name| "expected" == name.trim())
+}
+
+#[test]
+fn the_expected_column_is_found_by_name() {
+    assert_eq!(
+        expected_column("# name\tinput\texpected\topts\nrow\tsrc\tERROR:x\t\n"),
+        Some(2)
+    );
+    // Reordered, which a fixed index would read as `input`.
+    assert_eq!(expected_column("# name\texpected\tinput\topts\n"), Some(1));
+    // No header, and no column of that name, are both "cannot read this".
+    assert_eq!(expected_column("row\tsrc\tERROR:x\n"), None);
+    assert_eq!(expected_column("# name\tinput\topts\n"), None);
 }

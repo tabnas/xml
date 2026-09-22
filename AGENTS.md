@@ -653,11 +653,17 @@ therefore `yes` throughout; the gate that keeps it so is
 
 This section previously named six codes as having no fixture at all. All
 six had been covered since, and the count sat in prose where nothing
-could correct it. Three more gates in that file now read the
-canonical `error` table out of `ts/src/xml.ts` and hold
-`tabnas.plugin.json`, the `hint` table and the catalogue an installed
-parser carries to it, so "the two catalogues are exactly in step" is
-executed rather than asserted here.
+could correct it. Three more gates in that file read the canonical
+`error` table out of `ts/src/xml.ts` and hold `tabnas.plugin.json`, the
+`hint` table and the catalogue an installed parser carries to it.
+
+**Those gates compare TypeScript with RUST.** They never read `go/xml.go`
+and never install the Go parser, so a Go-only drift -- a reworded
+message, a lost placeholder, an extra or a missing code -- leaves every
+one of them green, and only fixture-covered behaviour would catch it.
+The Go catalogue is in step today, measured by hand off built instances,
+but that is a measurement and not a gate. A Go mirror of these gates is
+what would make the claim hold for both ports.
 
 ## Untrusted input
 

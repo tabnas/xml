@@ -78,6 +78,5 @@ Behavioural cases still belong here in `spec/`.
   which case fix TS first and pin the corrected behaviour here.
 - A new fixture must pass in ALL THREE runtimes before it counts:
   `go test ./...` from `go/`, `cargo test --all-targets` from `rs/`, and
-  **`npm run build && npm test`** from `ts/`. Plain `npm test` runs the
-  previously compiled `dist-test/`, so it can pass without ever loading a
-  newly added fixture.
+  `npm test` from `ts/`. `pretest` builds first, so the compiled
+  `dist-test/` a run loads is always the current one.
