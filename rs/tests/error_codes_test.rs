@@ -276,10 +276,20 @@ fn every_declared_code_is_pinned_by_a_fixture() {
     for entry in fs::read_dir(&spec).expect("the spec directory lists") {
         let path = entry.expect("a directory entry").path();
         if path.extension().is_some_and(|ext| ext == "tsv") {
-            rows.push_str(&fs::read_to_string(&path).expect("a fixture is readable"));
+            // Comment lines are dropped. A code named in a fixture's
+            // legend is prose, and counting it would make this gate agree
+            // with the prose it replaces rather than with the rows.
+            for line in fs::read_to_string(&path)
+                .expect("a fixture is readable")
+                .lines()
+                .filter(|line| !line.starts_with('#'))
+            {
+                rows.push_str(line);
+                rows.push('\n');
+            }
         }
     }
-    assert!(!rows.is_empty(), "no fixtures were read from {spec:?}");
+    assert!(!rows.is_empty(), "no fixture rows were read from {spec:?}");
     let unpinned: Vec<String> = descriptor_codes()
         .into_iter()
         .filter(|code| !rows.contains(&format!("ERROR:{code}")))
