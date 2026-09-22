@@ -25,19 +25,32 @@
 /// excluded from `NameChar` as a surrogate is.
 ///
 /// What that buys is narrower than "the document is rejected", and the
-/// difference matters to a caller: **the substitute is refused in a NAME,
-/// and accepted anywhere else.** This parser checks character data for
+/// difference matters to a caller. This parser checks character data for
 /// the illegal C0 controls (`check_chars`), not for the whole of `Char`,
-/// which the package states it does not implement. Writing the substitute
-/// as `U`, measured on this port:
+/// which the package states it does not implement. Writing the
+/// substitute as `U`, every context measured on this port rather than
+/// reasoned about:
 ///
 /// ```text
-/// <dU/>                 ERROR xml_invalid_tag
-/// <d>U</d>              parses
-/// <d a="U"/>            parses
-/// <d><!-- U --></d>     parses
-/// <d><![CDATA[U]]></d>  parses
+/// U<a/>                         ERROR text_at_top_level
+/// <a/>U                         ERROR text_at_top_level
+/// <dU/>                         ERROR xml_invalid_tag
+/// <d>U</d>                      parses
+/// <d a="U"/>                    parses
+/// <d><!-- U --></d>             parses
+/// <d><![CDATA[U]]></d>          parses
+/// <d><?pi U?></d>               parses
+/// <!DOCTYPE d [<!ELEMENT U ANY>]><d/>   parses
 /// ```
+///
+/// So it is refused in an ELEMENT OR ATTRIBUTE name, and accepted in
+/// text, attribute values, comments, CDATA, processing instructions and
+/// DTD declaration names. The first two rows are not a `Char` check at
+/// all: any character data outside the root is `text_at_top_level`, and
+/// the substitute is rejected there for the same reason a letter is. The
+/// last row is a NAME that is not refused, because declaration syntax is
+/// not validated -- so "refused in a name" would be wrong in both
+/// directions, which is how an earlier draft of this comment put it.
 ///
 /// So `decode_bom` followed by `parse` is not full XML `Char` validation,
 /// and a caller who needs that has to add it. The `not_a_scalar` function

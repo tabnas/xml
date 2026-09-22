@@ -111,8 +111,8 @@ them would not resolve. Only `XmlError` is re-exported.
 ## Differences from the canonical TypeScript
 
 The parsed value, the option names and defaults, and the error codes are
-the same. Six things differ, all of them forced by the language rather
-than chosen:
+the same. Six things differ. Five are forced by the language; the last is
+a choice this port made, and it is marked as one:
 
 - **Options are a struct, not a map.** `XmlOptions` has a field per
   option, with `Default` giving the canonical defaults. The plugin entry
@@ -127,9 +127,14 @@ than chosen:
   holds Unicode scalar values only, so a surrogate cannot survive
   decoding. U+FFFF stands in for it because the two are treated alike by
   every XML rule: neither is a valid `Char` and neither is a valid
-  `NameChar`, so a document carrying one is rejected in all three
-  runtimes. Folding it to U+FFFD would not be equivalent, because
-  U+FFFD is a valid name character.
+  `NameChar`. Folding it to U+FFFD would not be equivalent, because
+  U+FFFD is a valid name character. Note what that does and does not
+  buy: this parser checks character data for the illegal C0 controls and
+  not for the whole of `Char`, so the substitute is refused in an
+  element or attribute name and accepted in text, attribute values,
+  comments, CDATA, processing instructions and DTD declaration names.
+  `decode_bom` followed by `parse` is not full `Char` validation; the
+  doc comment on `decode_bom` carries the measured table.
 - **Patterns carry no lookaround.** The `regex` crate does not support
   it, so the few places the TypeScript grammar uses a negative lookahead
   are written as a positive match plus an inversion in a check hook.
@@ -141,10 +146,12 @@ than chosen:
   takes text and removes a leading U+FEFF. A caller holding a Latin-1
   byte string in Rust holds a `&[u8]`, so the case the canonical
   function detects at run time does not arise.
-- **The grammar text is public.** `GRAMMAR_TEXT` is exported so a caller
-  can inspect the installed rule chain, and the suite compares it with
-  `../xml-grammar.jsonic`. The canonical plugin keeps its copy private
-  and parses it at load time.
+- **The grammar text is public. (A CHOICE, not a constraint.)**
+  `GRAMMAR_TEXT` is exported so a caller can inspect the installed rule
+  chain, and the suite compares it with `../xml-grammar.jsonic`. The
+  canonical plugin keeps its copy private and parses it at load time.
+  Nothing in Rust required this; it is a wider public surface taken
+  deliberately, and it could be withdrawn without changing any parse.
 
 ## Build and test
 
