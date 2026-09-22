@@ -111,7 +111,7 @@ them would not resolve. Only `XmlError` is re-exported.
 ## Differences from the canonical TypeScript
 
 The parsed value, the option names and defaults, and the error codes are
-the same. Four things differ, all of them forced by the language rather
+the same. Six things differ, all of them forced by the language rather
 than chosen:
 
 - **Options are a struct, not a map.** `XmlOptions` has a field per
@@ -134,6 +134,17 @@ than chosen:
   it, so the few places the TypeScript grammar uses a negative lookahead
   are written as a positive match plus an inversion in a check hook.
   That is the shape the Go port already uses.
+- **Byte-order-mark handling is two functions.** The canonical
+  `decodeBOM` takes either a byte sequence or a string, and decides which
+  by looking at the code units it finds. Rust has the types for that
+  question already: `decode_bom` takes bytes and transcodes, `strip_bom`
+  takes text and removes a leading U+FEFF. A caller holding a Latin-1
+  byte string in Rust holds a `&[u8]`, so the case the canonical
+  function detects at run time does not arise.
+- **The grammar text is public.** `GRAMMAR_TEXT` is exported so a caller
+  can inspect the installed rule chain, and the suite compares it with
+  `../xml-grammar.jsonic`. The canonical plugin keeps its copy private
+  and parses it at load time.
 
 ## Build and test
 
