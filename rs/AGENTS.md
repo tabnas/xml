@@ -17,9 +17,10 @@ file covers only what is specific to this crate.
 | `tests/parity_test.rs` | every `../test/spec/*.tsv` fixture through `tabnas_support::Runner`, plus the named-column census |
 | `tests/xml_test.rs` | in-language cases mirrored from `go/xml_test.go`, `go/advance_col_test.go` and `go/perf_test.go` |
 | `tests/xmlconf_test.rs` | the W3C conformance corpus, mirrored from `go/xmlconf_test.go` |
+| `tests/error_codes_test.rs` | the twenty error codes, read out of `ts/src/xml.ts` and `../tabnas.plugin.json` and compared with the catalogue an installed parser carries |
 | `tests/version_test.rs` | `Cargo.toml`, `VERSION` and `ts/package.json` must agree |
 | `tests/common/mod.rs` | the value normaliser and the fixture unescape both suites share |
-| `README.md` | the crate front page; follows `../docs/STYLE-GUIDE.md` even though it is not yet in the gated list |
+| `README.md` | the crate front page; gated prose, listed in `ts/scripts/gated-docs.cjs` and so checked by `ts/test/docs.test.js` and `make prose` |
 
 ## Three crates by path
 
@@ -154,7 +155,8 @@ fail. Never turn that into a skip: a silent pass on an absent corpus is
 the failure mode the floors exist to prevent.
 
 The floors (`VALID_ACCEPT_FLOOR` 728, `VALID_CANONICAL_FLOOR` 232,
-`NOT_WF_REJECT_FLOOR` 438, and the narrow `NOT_WF_SA_REJECT_FLOOR` 74)
+`NOT_WF_REJECT_FLOOR` 438, and the two narrow ones,
+`VALID_SA_PASS_FLOOR` 120 and `NOT_WF_SA_REJECT_FLOOR` 74)
 are copied from `go/xmlconf_test.go` and the three runtimes currently
 report an identical dial. Raise a floor when conformance genuinely
 improves. Never lower one to make a red run green: a drop means the port
