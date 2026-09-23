@@ -333,7 +333,11 @@ fn read_catalog(file: &Path, base: &Path, into: &mut Vec<ConfTest>) {
 
 fn load_catalog() -> Vec<ConfTest> {
     let mut all = Vec::new();
-    read_catalog(&catalog_path(), Path::new("."), &mut all);
+    // Through `corpus()`, never `catalog_path()` directly: `corpus()` is the
+    // only thing that fetches, and libtest starts `xmlconf_catalog` and
+    // `xmlconf_census` first (it orders by name), so reading the path
+    // directly fails on every fresh checkout, not only in a race.
+    read_catalog(&corpus().join("xmlconf.xml"), Path::new("."), &mut all);
     all
 }
 
