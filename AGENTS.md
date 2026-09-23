@@ -662,16 +662,15 @@ could correct it. Three more gates in that file read the canonical
 `error` table out of `ts/src/xml.ts` and hold `tabnas.plugin.json`, the
 `hint` table and the catalogue an installed parser carries to it.
 
-**The Rust gate does not run for every file those gates read.**
+**The Rust gate runs for every file those gates read.**
 `.github/workflows/rust.yml` filters both its `push` and `pull_request`
-triggers by path, and neither list names `tabnas.plugin.json` or this
-file -- yet `the_descriptor_lists_the_canonical_codes` reads the first
-and `the_guide_states_the_catalogue_it_documents` reads the second. A
-change confined to either can therefore break a gate that never runs.
-Both paths belong in both lists. `.github/workflows/` is applied by a
-maintainer under ADR-8 and is not writable from an agent session, so
-this is recorded rather than fixed, alongside the other workflow items
-on [tabnas/admin#83](https://github.com/tabnas/admin/issues/83).
+triggers by path, and both lists name `tabnas.plugin.json` and this
+file, because `the_descriptor_lists_the_canonical_codes` reads the
+first and `the_guide_states_the_catalogue_it_documents` reads the
+second. A file missing from those lists lets a change confined to it
+break a gate that never runs, which is how this gap stood until
+tabnas/xml#56 closed it. A Rust test that starts reading another file
+outside `rs/` needs that file added to both lists in the same change.
 
 **Those gates compare TypeScript with RUST.** They never read `go/xml.go`
 and never install the Go parser, so a Go-only drift -- a reworded
