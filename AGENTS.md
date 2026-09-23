@@ -336,7 +336,7 @@ The TS build runs `embed-grammar.js` **before** `tsc`, so edits to
 
 ```bash
 npm install            # auto-installs the @tabnas/parser peer; resolves file: siblings
-npm run build          # node embed-grammar.js && tsc --build src test
+npm run build          # node embed-grammar.js && tsc --build src && tsc --build test
 npm test               # node --test dist-test/*.test.js (includes debug-model + doc-examples)
 ```
 
