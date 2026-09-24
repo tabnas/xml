@@ -11,7 +11,7 @@ A grammar plugin for the [Jsonic](https://github.com/tabnas/jsonic) parser
 engine that parses XML text into a tree of elements: attributes, mixed
 content, namespaces, entities, CDATA, comments, PIs, and DOCTYPE. The
 same parser ships in three languages: a TypeScript/JavaScript package
-on npm, a Go module and a Rust crate.
+on npm, a Go module, and a Rust crate.
 
 Docs, guides, the error reference and the playground: **[tabnas.dev](https://tabnas.dev)**.
 

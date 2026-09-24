@@ -9,7 +9,7 @@ This is the TypeScript / JavaScript package. A Go port lives in
 [`../go`](../go) (see [its README](../go/README.md)).
 
 [![npm version](https://img.shields.io/npm/v/@tabnas/xml.svg)](https://npmjs.com/package/@tabnas/xml)
-[![build](https://github.com/tabnas/xml/actions/workflows/build.yml/badge.svg)](https://github.com/tabnas/xml/actions/workflows/build.yml)
+[![CI](https://github.com/tabnas/xml/actions/workflows/ci.yml/badge.svg)](https://github.com/tabnas/xml/actions/workflows/ci.yml)
 
 ## Install
 

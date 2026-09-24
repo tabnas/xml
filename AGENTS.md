@@ -42,7 +42,7 @@ sweep, an install or a fetch, a release, a wait on CI, a benchmark, a
 script or loop you write, and anything sent to the background.
 
 - **Minimal is enough.** One line with the step and a count, such as
-  `conformance: 412/1500 (27%)`, meets it. When no total is known, print
+  `conformance: 412 of 1500 (27%)`, meets it. When no total is known, print
   what is known (the step, the current item, the elapsed time) and say the
   percentage is unknown rather than inventing one.
 - **Build it into what you write.** A script or loop prints a line per
@@ -765,25 +765,21 @@ document that needs them is a document to reject.
 
 ## CI
 
-`.github/workflows/build.yml` has two jobs, neither publishing to npm:
+`.github/workflows/ci.yml` is a caller: it delegates to the org-shared
+`tabnas/.github/.github/workflows/polyglot-ci.yml@main` and passes
+`deps: "parser support debug json jsonic"`, the siblings that workflow
+git-clones and builds this repository against. The operating systems,
+the Node and Go versions and the steps live in that shared workflow,
+and are not restated here. It publishes nothing;
+`.github/workflows/release.yml` handles releases.
 
-- **build** (Ubuntu/Windows/macOS, Node 24): sets
-  `git config --global core.autocrlf false` (CRLF corrupts the `.tsv`
-  fixtures), checks this repo out at `path: xml`, git-clones the tabnas
-  closure (`parser debug json abnf railroad jsonic`) as siblings, then
-  `npm i && npm run build --if-present` for each of
-  `parser debug json abnf railroad jsonic xml` in order, and finally
-  `npm test` in `xml/ts`. Because `@tabnas/debug` is a devDependency, the
-  `debug-model` composition test runs as part of `npm test`. `npm test`
-  also runs the `pretest` hook, which fetches the W3C conformance corpus,
-  so the conformance suites run in CI.
-- **build-go** (Ubuntu/macOS, Go 1.24): clones the same siblings, then
-  (mirroring `admin/scripts/link.sh`) creates `vendor/` symlinks for any
-  `../vendor/` replaces and a `go work` over every non-vendor-replaced
-  module, then `go build ./...` / `go test -v ./...` in `xml/go`.
-  `TestMain` fetches the W3C conformance corpus before any test runs, so
-  the conformance suite runs in CI here too — and hard-fails if the
-  corpus cannot be downloaded rather than skipping.
+It runs `npm test` in `ts/` and the Go tests in `go/`. Because
+`@tabnas/debug` is a devDependency, the `debug-model` composition test
+runs as part of `npm test`. `npm test` also runs the `pretest` hook,
+which fetches the W3C conformance corpus, so the conformance suites run
+in CI. On the Go side `TestMain` fetches the corpus before any test
+runs, so the conformance suite runs there too — and hard-fails if the
+corpus cannot be downloaded rather than skipping.
 
 Every hook reaches `w3.org` at test time. That is deliberate: the
 alternative was a suite that silently did not run, which is what CI did

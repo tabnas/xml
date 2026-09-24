@@ -5,7 +5,7 @@ XML 1.0 grammar plugin for the
 `tabnas_xml`.
 
 The plugin parses XML text into a tree of plain values: elements with a
-name, a local name, an attribute map and a list of children. It covers
+name, a local name, an attribute map, and a list of children. It covers
 attributes, mixed content, namespaces, entities (the five predefined
 ones, numeric character references, caller-supplied entities and
 `<!ENTITY>` declarations in the DOCTYPE internal subset), CDATA
@@ -132,7 +132,7 @@ a choice this port made, and it is marked as one:
   buy: this parser checks character data for the illegal C0 controls and
   not for the whole of `Char`, so the substitute is refused in an
   element or attribute name and accepted in text, attribute values,
-  comments, CDATA, processing instructions and DTD declaration names.
+  comments, CDATA, processing instructions, and DTD declaration names.
   `decode_bom` followed by `parse` is not full `Char` validation; the
   doc comment on `decode_bom` carries the measured table.
 - **Patterns carry no lookaround.** The `regex` crate does not support
@@ -163,7 +163,7 @@ cargo test --all-targets && cargo test --doc
 ```
 
 Or, from the repository root, `make test-rs`. For what CI would say,
-including formatting, clippy and the lockfile check, run
+including formatting, Clippy and the lockfile check, run
 `ci/rust/run.sh`.
 
 The suite runs the shared `../test/spec/*.tsv` conformance fixtures, the
