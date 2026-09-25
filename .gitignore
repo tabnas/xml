@@ -44,3 +44,5 @@ test/xmlconf/
 
 # Rust build output (rs/ crate).
 target/
+
+.DS_Store
