@@ -6,6 +6,7 @@
 //! `ts/src/xml.ts` walks it.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use tabnas::Value;
 
@@ -44,7 +45,7 @@ pub(crate) fn resolve_namespaces(element: &mut Value, strict: bool) -> Result<()
         space: "default".to_string(),
         lang: String::new(),
     };
-    resolve_scope(element, &scope, strict)
+    resolve_scope(element, scope, strict)
 }
 
 fn attribute_text(value: &Value) -> String {
@@ -54,7 +55,31 @@ fn attribute_text(value: &Value) -> String {
     }
 }
 
-fn resolve_scope(element: &mut Value, scope: &Scope, strict: bool) -> Result<(), &'static str> {
+/// Walk the tree from `root` with a stack of its own rather than by
+/// recursion: a document nested some thousands of elements deep would
+/// otherwise overflow the thread's stack, which ends the process where no
+/// error can be caught. Children go on in reverse, so they come off in
+/// document order: the walk is the pre-order a recursion makes, with the
+/// same first error and the same partial annotation.
+fn resolve_scope(root: &mut Value, scope: Scope, strict: bool) -> Result<(), &'static str> {
+    let mut pending = vec![(root, Rc::new(scope))];
+    while let Some((element, scope)) = pending.pop() {
+        resolve_element(element, &scope, strict, &mut pending)?;
+    }
+    Ok(())
+}
+
+/// The elements still to resolve, each with the scope it inherits.
+type Pending<'a> = Vec<(&'a mut Value, Rc<Scope>)>;
+
+/// Resolve one element against the scope it inherits, and queue its
+/// element children, last first, with the scope it passes on.
+fn resolve_element<'a>(
+    element: &'a mut Value,
+    scope: &Scope,
+    strict: bool,
+    pending: &mut Pending<'a>,
+) -> Result<(), &'static str> {
     let Some(map) = element.as_object_mut() else {
         return Ok(());
     };
@@ -149,11 +174,11 @@ fn resolve_scope(element: &mut Value, scope: &Scope, strict: bool) -> Result<(),
         map.insert("lang".to_string(), Value::String(lang.clone()));
     }
 
-    let child_scope = Scope { ns, space, lang };
+    let child_scope = Rc::new(Scope { ns, space, lang });
     if let Some(children) = map.get_mut("children").and_then(Value::as_array_mut) {
-        for child in children.iter_mut() {
+        for child in children.iter_mut().rev() {
             if matches!(child, Value::Object(_)) {
-                resolve_scope(child, &child_scope, strict)?;
+                pending.push((child, Rc::clone(&child_scope)));
             }
         }
     }
@@ -183,6 +208,84 @@ mod tests {
             Value::Object(map) => map.get(key),
             _ => None,
         }
+    }
+
+    /// A tree `depth` elements deep, built from the inside out: the
+    /// innermost element is `innermost`, and `xmlns:p` is declared on the
+    /// outermost.
+    fn deep(depth: usize, innermost: &str) -> Value {
+        let mut tree = element(innermost, &[], vec![]);
+        for level in 1..depth {
+            let declared: &[(&str, &str)] = if level + 1 == depth {
+                &[("xmlns:p", "urn:p")]
+            } else {
+                &[]
+            };
+            tree = element("p:a", declared, vec![tree]);
+        }
+        tree
+    }
+
+    /// The innermost element, reached a level at a time.
+    fn innermost(tree: &Value) -> &Value {
+        let mut here = tree;
+        while let Some(Value::Array(children)) = field(here, "children") {
+            match children.first() {
+                Some(child) => here = child,
+                None => break,
+            }
+        }
+        here
+    }
+
+    /// Take a tree apart a level at a time: a value drops by recursion, and
+    /// one this deep would overflow the stack doing it.
+    fn dismantle(tree: Value) {
+        let mut pending = vec![tree];
+        while let Some(mut value) = pending.pop() {
+            let children = value
+                .as_object_mut()
+                .and_then(|map| map.get_mut("children"))
+                .and_then(Value::as_array_mut);
+            if let Some(children) = children {
+                pending.append(children);
+            }
+        }
+    }
+
+    #[test]
+    fn a_deep_tree_is_walked_without_the_call_stack() {
+        // The walk used to recurse once per level, which ended the process
+        // with a stack overflow some thousands of levels deep (tabnas/xml#68).
+        // It keeps a stack of its own now, so 20,000 levels resolve on a
+        // thread with 256 KiB of stack, where each level used to take a
+        // frame. The tree is built, walked and taken apart on that thread.
+        let walk = |innermost_name: &'static str| {
+            std::thread::Builder::new()
+                .stack_size(256 << 10)
+                .spawn(move || {
+                    let mut tree = deep(20_000, innermost_name);
+                    let outcome = resolve_namespaces(&mut tree, true);
+                    let deepest = innermost(&tree);
+                    let found = ["namespace", "localName"].map(|key| match field(deepest, key) {
+                        Some(Value::String(text)) => Some(text.clone()),
+                        _ => None,
+                    });
+                    dismantle(tree);
+                    (outcome, found)
+                })
+                .expect("spawns")
+                .join()
+                .expect("walked without overflowing the stack")
+        };
+        let (outcome, [namespace, local_name]) = walk("p:z");
+        assert_eq!(outcome, Ok(()));
+        assert_eq!(namespace.as_deref(), Some("urn:p"));
+        assert_eq!(local_name.as_deref(), Some("z"));
+        // The first error is still the one a pre-order walk meets first:
+        // here, the innermost element's unbound prefix.
+        let (outcome, _) = walk("q:z");
+        assert_eq!(outcome, Err("unbound_prefix"));
     }
 
     #[test]

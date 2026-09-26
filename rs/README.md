@@ -111,8 +111,8 @@ them would not resolve. Only `XmlError` is re-exported.
 ## Differences from the canonical TypeScript
 
 The parsed value, the option names and defaults, and the error codes are
-the same. Six things differ. Five are forced by the language; the last is
-a choice this port made, and it is marked as one:
+the same. Seven things differ. Six are forced by the language or its
+engine; the last is a choice this port made, and it is marked as one:
 
 - **Options are a struct, not a map.** `XmlOptions` has a field per
   option, with `Default` giving the canonical defaults. The plugin entry
@@ -146,6 +146,15 @@ a choice this port made, and it is marked as one:
   takes text and removes a leading U+FEFF. A caller holding a Latin-1
   byte string in Rust holds a `&[u8]`, so the case the canonical
   function detects at run time does not arise.
+- **Nesting past 256 open elements is refused**, with the engine's
+  `cancel` code. The engine walks a nested value by recursion to display,
+  convert, clone, compare or drop it, and drops its rule snapshots the
+  same way, and a stack overflow ends the process where no error can be
+  caught. Displaying a value about 400 elements deep overflowed a 2 MiB
+  thread's stack in a debug build. 256 is the depth libxml2 allows by
+  default. TypeScript and Go accept any depth. No document a person
+  writes comes near the limit, and a self-closed element, which opens
+  and closes at once, does not count toward it.
 - **The grammar text is public. (A CHOICE, not a constraint.)**
   `GRAMMAR_TEXT` is exported so a caller can inspect the installed rule
   chain, and the suite compares it with `../xml-grammar.jsonic`. The

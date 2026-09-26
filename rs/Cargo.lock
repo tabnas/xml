@@ -188,7 +188,7 @@ dependencies = [
 
 [[package]]
 name = "tabnas-xml"
-version = "0.7.9"
+version = "0.7.10"
 dependencies = [
  "indexmap",
  "regex",
