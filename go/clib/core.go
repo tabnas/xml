@@ -24,8 +24,8 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	plug "github.com/tabnas/xml/go"
 	host "github.com/tabnas/jsonic/go"
+	plug "github.com/tabnas/xml/go"
 )
 
 const (
@@ -86,7 +86,11 @@ var _ = &sharedMu // referenced only by opt-in constructs
 // ignore it; a row that defines options must validate it here, since
 // nothing upstream does.
 func newParser(opts string) (parseFn, error) {
-	j := host.Make(); if err := j.UseDefaults(plug.Xml, plug.Defaults); err != nil { return nil, err }; return func(src string) (any, error) { return j.Parse(plug.DecodeBOM(src)) }, nil
+	j := host.Make()
+	if err := j.UseDefaults(plug.Xml, plug.Defaults); err != nil {
+		return nil, err
+	}
+	return func(src string) (any, error) { return j.Parse(plug.DecodeBOM(src)) }, nil
 }
 
 // reply marshals a result document. Marshalling cannot fail for the
