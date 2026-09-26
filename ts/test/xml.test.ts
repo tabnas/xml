@@ -108,6 +108,34 @@ describe('xml-embedded-in-jsonic', () => {
 })
 
 
+describe('deep nesting', () => {
+  // Namespace resolution walked the tree by recursion, a call per element,
+  // and a document a few thousand elements deep ended in a RangeError,
+  // which carries no error code (tabnas/xml#68). The walk keeps a stack
+  // of its own now.
+  const nested = (depth: number, innermost: string) =>
+    '<p:a xmlns:p="urn:p">' +
+    '<p:a>'.repeat(depth - 1) +
+    innermost +
+    '</p:a>'.repeat(depth)
+
+  test('a document 20,000 elements deep parses and resolves', () => {
+    const j = new Tabnas().use(jsonic).use(Xml)
+    let element = j.parse(nested(20000, '<p:z/>')) as any
+    while (0 < element.children.length) element = element.children[0]
+    assert.equal(element.localName, 'z')
+    assert.equal(element.namespace, 'urn:p')
+  })
+
+  test('the first error is still the one a pre-order walk meets first', () => {
+    const j = new Tabnas().use(jsonic).use(Xml, { strictNamespaces: true })
+    assert.throws(
+      () => j.parse(nested(20000, '<q:z/>')),
+      (err: any) => 'unbound_prefix' === err.code,
+    )
+  })
+})
+
 describe('decodeBOM', () => {
   // Regression: decodeBOM built the UTF-16 string with
   // `String.fromCharCode(...units)`, which overflows the call stack

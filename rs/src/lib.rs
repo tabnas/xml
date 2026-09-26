@@ -59,7 +59,7 @@ pub use bom::{decode_bom, strip_bom};
 /// release orchestrator rewrites both, and `tests/version_test.rs` fails
 /// the build if they drift. Mirrors `VERSION` in `ts/src/xml.ts` and
 /// `const VERSION` in `go/xml.go`.
-pub const VERSION: &str = "0.7.9";
+pub const VERSION: &str = "0.7.10";
 
 /// The README's Rust examples run as doctests, so a stale one fails the
 /// gate rather than misleading the reader. Its `toml` and `bash` fences
@@ -706,6 +706,10 @@ pub fn xml(parser: &mut Tabnas, options: &XmlOptions) -> Result<(), PluginError>
             parser.remove_rule(name);
         }
     }
+
+    // The nesting limit is the lexer's (see `lex::DEPTH_LIMIT`), not a
+    // budget: a caller's `parse_budget` replaces the budget in place, and
+    // would take a limit kept there with it.
     Ok(())
 }
 

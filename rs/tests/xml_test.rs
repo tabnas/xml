@@ -919,3 +919,68 @@ fn the_shared_default_parser_is_safe_across_threads() {
         thread.join().expect("no thread panicked");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Nesting depth (tabnas/xml#68)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn nesting_past_256_open_elements_is_refused() {
+    // Rust only: TypeScript and Go have no limit (README.md, "Differences
+    // from the canonical TypeScript"). The engine walks a value by
+    // recursion, and one some hundreds of elements deep overflowed a test
+    // thread's stack when displayed, which ends the process. The count is
+    // of open elements: a self-closed element opens and closes at once, so
+    // the innermost one here adds no depth.
+    let nested = |depth: usize| "<a>".repeat(depth) + &"</a>".repeat(depth);
+    let parser = make();
+    let at_limit = "<a>".repeat(256) + "<b/>" + &"</a>".repeat(256);
+    let value = parser.parse(&at_limit).expect("256 open elements parse");
+    // The value is usable here, on a test thread: displayed, converted,
+    // cloned, compared and dropped.
+    assert!(!value.to_string().is_empty());
+    assert!(!value.to_json().is_null());
+    assert!(value == value.clone());
+    for depth in [257, 100_000] {
+        let error = parser
+            .parse(&nested(depth))
+            .err()
+            .unwrap_or_else(|| panic!("{depth} deep must be refused"));
+        assert_eq!(error.code, "cancel", "{depth} deep");
+        // The report is of the tag that would open the 257th element.
+        assert_eq!((error.pos, error.len), (256 * 3, 3), "{depth} deep");
+    }
+    // Width is not depth.
+    let wide = format!("<r>{}</r>", "<a><b/></a>".repeat(10_000));
+    assert!(parser.parse(&wide).is_ok());
+}
+
+#[test]
+fn a_budget_set_after_the_grammar_keeps_the_limit() {
+    // A caller's `parse_budget` replaces the budget in place, so the limit
+    // is the lexer's, where no budget reaches it.
+    let mut parser = make();
+    parser.parse_budget(1, |_context| true);
+    let error = parser
+        .parse(&("<a>".repeat(100_000) + &"</a>".repeat(100_000)))
+        .err()
+        .unwrap_or_else(|| panic!("100,000 deep must be refused"));
+    assert_eq!(error.code, "cancel");
+}
+
+#[test]
+fn a_budget_set_before_the_grammar_still_runs() {
+    // The plugin leaves the budget alone: jsonic's, or, as here, one a
+    // caller set, still runs.
+    let counted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = counted.clone();
+    let mut parser = Tabnas::new();
+    parser.parse_budget(1, move |_context| {
+        seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        true
+    });
+    tabnas_jsonic::jsonic(&mut parser).expect("jsonic");
+    parser.use_plugin(plugin(), None).expect("xml");
+    assert!(parser.parse("<a><b>t</b></a>").is_ok());
+    assert!(counted.load(std::sync::atomic::Ordering::Relaxed) > 0);
+}

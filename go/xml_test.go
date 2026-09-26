@@ -164,3 +164,45 @@ func jsonFlatten(v any) any {
 // Compile-time assertion that specEntry stringifies meaningfully in
 // error messages (keeps `fmt` import stable if trimmed elsewhere).
 var _ = fmt.Sprintf
+
+// TestDeepNesting holds namespace resolution to the same answers at
+// depth. The walk recursed once per element in every port. Go's stacks
+// grow, so it did not fail here as it did in TypeScript and Rust, but it
+// keeps a stack of its own now too (tabnas/xml#68).
+func TestDeepNesting(t *testing.T) {
+	nested := func(depth int, innermost string) string {
+		return `<p:a xmlns:p="urn:p">` + strings.Repeat("<p:a>", depth-1) +
+			innermost + strings.Repeat("</p:a>", depth)
+	}
+	parse := func(src string, opts map[string]any) (any, error) {
+		j := jsonic.Make()
+		if err := j.UseDefaults(Xml, Defaults, opts); err != nil {
+			t.Fatal(err)
+		}
+		return j.Parse(src)
+	}
+
+	out, err := parse(nested(20000, "<p:z/>"), map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	element, _ := out.(map[string]any)
+	for {
+		children, _ := element["children"].([]any)
+		if len(children) == 0 {
+			break
+		}
+		element, _ = children[0].(map[string]any)
+	}
+	if element["localName"] != "z" || element["namespace"] != "urn:p" {
+		t.Errorf("innermost element: localName %v, namespace %v",
+			element["localName"], element["namespace"])
+	}
+
+	// The first error is still the one a pre-order walk meets first: here,
+	// the innermost element's unbound prefix.
+	_, err = parse(nested(20000, "<q:z/>"), map[string]any{"strictNamespaces": true})
+	if err == nil || !strings.Contains(err.Error(), "unbound_prefix") {
+		t.Errorf("want unbound_prefix, got %v", err)
+	}
+}

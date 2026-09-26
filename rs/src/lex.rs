@@ -102,8 +102,28 @@ pub(crate) fn discount_bom(context: &Context, site: &mut tabnas::Site) {
     }
 }
 
+/// How many elements may be open at once. The tag that would open one
+/// more is refused where it is read, with the engine's `cancel` code.
+///
+/// The engine walks a nested value by recursion, a call per level, to
+/// display, convert, clone, compare or drop it, and drops the snapshots of
+/// the rules on its stack, three to an element, the same way. A stack
+/// overflow ends the process where no error can be caught. The parse
+/// itself got through 16,000 elements on a 2 MiB thread in a release
+/// build, but displaying the value overflowed that stack about 400
+/// elements deep in a debug build. 256, the depth libxml2 allows by
+/// default, leaves room for every one of those on a default thread.
+/// TypeScript and Go have no limit (`README.md` records the difference),
+/// and no document a person writes comes near this one.
+///
+/// The lexer enforces it, not a parse budget, because a caller's
+/// `parse_budget` replaces the budget in place: a limit kept there would
+/// go whenever a caller set one after this plugin. The lexer keeps the
+/// count anyway, so the check costs a comparison per open tag.
+pub(crate) const DEPTH_LIMIT: i64 = 256;
+
 /// The XML nesting depth of the parse so far: open tags minus close tags.
-pub(crate) fn depth(context: &Context) -> i64 {
+fn depth(context: &Context) -> i64 {
     match context.u.get(DEPTH) {
         Some(Value::Number(depth)) => *depth as i64,
         _ => 0,
@@ -441,6 +461,9 @@ fn scan(state: &MatcherState, context: &mut Context, rest: &str) -> Scan {
         }
 
         if bytes[i] == b'>' {
+            if depth(context) >= DEPTH_LIMIT {
+                return bad("cancel", 0, i + 1);
+            }
             set_depth(context, depth(context) + 1);
             return Scan::Token {
                 name: "#XOP",

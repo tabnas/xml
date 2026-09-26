@@ -1572,8 +1572,32 @@ function invalidNamespaceURI(uri: string): boolean {
 // Returns '' on success or an XML namespace error code on the first
 // violation (reserved-prefix misuse, unbound prefix). On error the
 // tree may be partly annotated; callers should treat that as undefined.
+//
+// The walk keeps its own stack of elements still to visit rather than
+// recursing, since a document nested a few thousand elements deep would
+// otherwise exhaust the call stack with a RangeError, which carries no
+// error code. Children go on in reverse, so they come off in document
+// order: the walk is the pre-order a recursion makes, with the same first
+// error and the same partial annotation.
 function resolveScope(
-  element: XmlElement, scope: XmlScope, strict: boolean,
+  root: XmlElement, rootScope: XmlScope, strict: boolean,
+): string {
+  const pending: [XmlElement, XmlScope][] = [[root, rootScope]]
+  while (0 < pending.length) {
+    const [element, scope] = pending.pop()!
+    const err = resolveElement(element, scope, strict, pending)
+    if (err) return err
+  }
+  return ''
+}
+
+// Resolve one element against the scope it inherits, and queue its
+// element children, last first, with the scope it passes on.
+function resolveElement(
+  element: XmlElement,
+  scope: XmlScope,
+  strict: boolean,
+  pending: [XmlElement, XmlScope][],
 ): string {
   // Keyed by namespace prefixes the document controls, so it is allocated
   // without a prototype: `xmlns:__proto__` would otherwise reparent the scope
@@ -1659,10 +1683,11 @@ function resolveScope(
   if (lang !== '') (element as any).lang = lang
 
   const childScope: XmlScope = { ns, space, lang }
-  for (const child of element.children) {
+  const children = element.children
+  for (let i = children.length - 1; 0 <= i; i--) {
+    const child = children[i]
     if (child && 'object' === typeof child) {
-      const err = resolveScope(child, childScope, strict)
-      if (err) return err
+      pending.push([child, childScope])
     }
   }
   return ''
@@ -1681,7 +1706,7 @@ Xml.defaults = {
 // VERSION is this package's version. It MUST equal package.json "version":
 // the release orchestrator rewrites both, and the version test fails the
 // build if they drift. Mirrors `const VERSION` in go/xml.go.
-const VERSION = '0.7.9'
+const VERSION = '0.7.10'
 
 export { Xml, decodeBOM, VERSION }
 

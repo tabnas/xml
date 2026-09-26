@@ -29,7 +29,7 @@ import (
 // VERSION is this module's version. It MUST equal ts/package.json
 // "version": the release orchestrator rewrites both, and
 // TestVersionMatchesPackageJSON fails the build if they drift.
-const VERSION = "0.7.9"
+const VERSION = "0.7.10"
 
 // Defaults are merged with caller-supplied options when the plugin is
 // registered via jsonic.UseDefaults.
@@ -1626,7 +1626,38 @@ func invalidNamespaceURI(uri string) bool {
 	return false
 }
 
-func resolveScope(element map[string]any, scope xmlScope, strict bool) string {
+// resolveScope walks the tree from `root` with a stack of its own rather
+// than by recursion. A goroutine's stack grows, so recursion would not
+// fail as early here as in TypeScript, but it would still grow with the
+// depth of the document, up to the runtime's fatal limit. Children go on
+// in reverse, so they come off in document order: the walk is the
+// pre-order a recursion makes, with the same first error and the same
+// partial annotation.
+func resolveScope(root map[string]any, rootScope xmlScope, strict bool) string {
+	pending := []pendingElement{{root, rootScope}}
+	for len(pending) > 0 {
+		next := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		var err string
+		if pending, err = resolveElement(next.element, next.scope, strict, pending); err != "" {
+			return err
+		}
+	}
+	return ""
+}
+
+// pendingElement is an element still to be resolved, with the scope it
+// inherits.
+type pendingElement struct {
+	element map[string]any
+	scope   xmlScope
+}
+
+// resolveElement resolves one element against the scope it inherits, and
+// queues its element children, last first, with the scope it passes on.
+func resolveElement(
+	element map[string]any, scope xmlScope, strict bool, pending []pendingElement,
+) ([]pendingElement, string) {
 	local := xmlScope{
 		ns:    make(map[string]string, len(scope.ns)+4),
 		space: scope.space,
@@ -1648,10 +1679,10 @@ func resolveScope(element map[string]any, scope xmlScope, strict bool) string {
 			switch {
 			case k == "xmlns":
 				if s == xmlNSURI || s == xmlnsNSURI {
-					return "reserved_namespace"
+					return pending, "reserved_namespace"
 				}
 				if invalidNamespaceURI(s) {
-					return "invalid_namespace_uri"
+					return pending, "invalid_namespace_uri"
 				}
 				local.ns[""] = s
 			case strings.HasPrefix(k, "xmlns:"):
@@ -1659,17 +1690,17 @@ func resolveScope(element map[string]any, scope xmlScope, strict bool) string {
 				switch prefix {
 				case "xml":
 					if s != xmlNSURI {
-						return "reserved_namespace"
+						return pending, "reserved_namespace"
 					}
 				case "xmlns":
-					return "reserved_namespace"
+					return pending, "reserved_namespace"
 				default:
 					if s == xmlNSURI || s == xmlnsNSURI {
-						return "reserved_namespace"
+						return pending, "reserved_namespace"
 					}
 				}
 				if invalidNamespaceURI(s) {
-					return "invalid_namespace_uri"
+					return pending, "invalid_namespace_uri"
 				}
 				local.ns[prefix] = s
 			case k == "xml:space":
@@ -1691,7 +1722,7 @@ func resolveScope(element map[string]any, scope xmlScope, strict bool) string {
 				}
 				if colon := strings.Index(k, ":"); colon > 0 {
 					if _, ok := local.ns[k[:colon]]; !ok {
-						return "unbound_prefix"
+						return pending, "unbound_prefix"
 					}
 				}
 			}
@@ -1706,7 +1737,7 @@ func resolveScope(element map[string]any, scope xmlScope, strict bool) string {
 		if uri, ok := local.ns[prefix]; ok {
 			element["namespace"] = uri
 		} else if strict {
-			return "unbound_prefix"
+			return pending, "unbound_prefix"
 		}
 		// Not strict: leave `namespace` unset — the element is named but
 		// unqualified, which is what a namespace-unaware (yet XML 1.0
@@ -1726,14 +1757,12 @@ func resolveScope(element map[string]any, scope xmlScope, strict bool) string {
 	}
 
 	children, _ := element["children"].([]any)
-	for _, c := range children {
-		if ce, ok := c.(map[string]any); ok {
-			if err := resolveScope(ce, local, strict); err != "" {
-				return err
-			}
+	for i := len(children) - 1; i >= 0; i-- {
+		if ce, ok := children[i].(map[string]any); ok {
+			pending = append(pending, pendingElement{ce, local})
 		}
 	}
-	return ""
+	return pending, ""
 }
 
 // --- helpers ---
