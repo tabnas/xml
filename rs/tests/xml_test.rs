@@ -947,6 +947,8 @@ fn nesting_past_256_open_elements_is_refused() {
             .err()
             .unwrap_or_else(|| panic!("{depth} deep must be refused"));
         assert_eq!(error.code, "cancel", "{depth} deep");
+        // The report is of the tag that would open the 257th element.
+        assert_eq!((error.pos, error.len), (256 * 3, 3), "{depth} deep");
     }
     // Width is not depth.
     let wide = format!("<r>{}</r>", "<a><b/></a>".repeat(10_000));
@@ -954,9 +956,22 @@ fn nesting_past_256_open_elements_is_refused() {
 }
 
 #[test]
+fn a_budget_set_after_the_grammar_keeps_the_limit() {
+    // A caller's `parse_budget` replaces the budget in place, so the limit
+    // is the lexer's, where no budget reaches it.
+    let mut parser = make();
+    parser.parse_budget(1, |_context| true);
+    let error = parser
+        .parse(&("<a>".repeat(100_000) + &"</a>".repeat(100_000)))
+        .err()
+        .unwrap_or_else(|| panic!("100,000 deep must be refused"));
+    assert_eq!(error.code, "cancel");
+}
+
+#[test]
 fn a_budget_set_before_the_grammar_still_runs() {
-    // The depth limit is checked ahead of the budget already in place,
-    // which it keeps: jsonic's, or, as here, one a caller set.
+    // The plugin leaves the budget alone: jsonic's, or, as here, one a
+    // caller set, still runs.
     let counted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let seen = counted.clone();
     let mut parser = Tabnas::new();

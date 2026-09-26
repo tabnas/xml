@@ -707,39 +707,11 @@ pub fn xml(parser: &mut Tabnas, options: &XmlOptions) -> Result<(), PluginError>
         }
     }
 
-    // The depth limit goes in AFTER the documents, as jsonic's budget
-    // does, since a document applies options and one that does not name
-    // `parse.budget` need not keep it. It is checked ahead of the budget
-    // already in place, jsonic's or a caller's, which still runs as it
-    // did.
-    let budget = parser.config().parse.budget;
-    let (every, check) = (budget.check_every_n, budget.on_check);
-    parser.parse_budget(1, move |context| {
-        lex::depth(context) <= DEPTH_LIMIT
-            && match &check {
-                Some(check) if every > 0 && context.iteration % every == 0 => check(context),
-                _ => true,
-            }
-    });
+    // The nesting limit is the lexer's (see `lex::DEPTH_LIMIT`), not a
+    // budget: a caller's `parse_budget` replaces the budget in place, and
+    // would take a limit kept there with it.
     Ok(())
 }
-
-/// How many elements may be open at once before a parse is refused, with
-/// the engine's `cancel` code.
-///
-/// The engine walks a nested value by recursion, a call per level, to
-/// display, convert, clone, compare or drop it, and drops the snapshots of
-/// the rules on its stack, three to an element, the same way. A stack
-/// overflow ends the process where no error can be caught. The parse
-/// itself got through 16,000 elements on a 2 MiB thread in a release
-/// build, but displaying the value overflowed that stack about 400
-/// elements deep in a debug build. 256, the depth libxml2 allows by
-/// default, leaves room for every one of those on a default thread.
-/// TypeScript and Go have no limit (`README.md` records the difference),
-/// and no document a person writes comes near this one. The count is the
-/// lexer's own (open tags less close tags, see [`lex::depth`]), so it
-/// costs nothing per step.
-const DEPTH_LIMIT: i64 = 256;
 
 /// Register every function reference the grammar names.
 fn register_refs(parser: &mut Tabnas, namespaces: bool, strict_namespaces: bool, embed: bool) {
