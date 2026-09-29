@@ -5,7 +5,7 @@
 #
 # The engine, the relaxed-JSON base grammar and the fixture runner are
 # PATH DEPENDENCIES on sibling checkouts (rs/Cargo.toml:
-# `tabnas = { path = "../../parser/rs" }`,
+# `tabnas = { package = "tabnas-parser", path = "../../parser/rs" }`,
 # `tabnas-jsonic = { path = "../../jsonic/rs" }`, and as a dev-dependency
 # `tabnas-support = { path = "../../support/rs" }`). jsonic in turn takes
 # `tabnas-json` from `../../json/rs`, so that checkout is needed too even
@@ -85,7 +85,7 @@ fi
 lock_without_sibling_versions() {
   awk '
     /^\[\[package\]\]$/                { sib = 0 }
-    /^name = "tabnas"$/                { sib = 1 }
+    /^name = "tabnas-parser"$/                { sib = 1 }
     /^name = "tabnas-json"$/           { sib = 1 }
     /^name = "tabnas-jsonic"$/         { sib = 1 }
     /^name = "tabnas-support"$/        { sib = 1 }

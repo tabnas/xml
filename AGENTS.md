@@ -130,7 +130,7 @@ publish tagged releases). Unlike most grammar plugins, this one depends on
 - Go (`go/go.mod`): `replace github.com/tabnas/jsonic/go => ../../jsonic/go`.
   That is the module's only tabnas dependency (jsonic is the legacy shim
   over the relaxed-JSON engine; it transitively brings in the parser).
-- Rust (`rs/Cargo.toml`): `tabnas = { path = "../../parser/rs" }` and
+- Rust (`rs/Cargo.toml`): `tabnas = { package = "tabnas-parser", path = "../../parser/rs" }` and
   `tabnas-jsonic = { path = "../../jsonic/rs" }`, plus the
   dev-dependency `tabnas-support = { path = "../../support/rs" }` for
   the shared fixture runner. jsonic brings `tabnas-json` from
