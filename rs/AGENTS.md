@@ -9,16 +9,18 @@ file covers only what is specific to this crate.
 
 | Path | |
 |---|---|
-| `src/lib.rs` | `XmlOptions`, the embedded grammar, the typed reference registrations, `xml`, `plugin`, `make`, `make_with`, `parse` |
+| `src/lib.rs` | `XmlOptions`, the embedded grammar, the typed reference registrations, `xml`, `plugin`, `make`, `make_with`, `parse`, and the translation parts `manifest_text` and `render_text`, `include_str!` of the copies in `translate/` |
 | `src/lex.rs` | the imperative `xmltag` matcher: the one place raw XML syntax is recognised |
 | `src/entity.rs` | name and character classes, entity declaration and reference handling, DOCTYPE mining, line ending and attribute whitespace normalisation |
 | `src/namespace.rs` | prefix resolution over the finished tree |
 | `src/bom.rs` | `decode_bom` and `strip_bom` |
+| `translate/` | the crate's copies of `../tabnas.plugin.json` (as `manifest.json`) and `../alchemy/render.alc`, which a packaged crate needs; `tests/translate_test.rs` holds them to the files |
 | `tests/parity_test.rs` | every `../test/spec/*.tsv` fixture through `tabnas_support::Runner`, plus the named-column census |
 | `tests/xml_test.rs` | in-language cases mirrored from `go/xml_test.go`, `go/advance_col_test.go` and `go/perf_test.go` |
 | `tests/xmlconf_test.rs` | the W3C conformance corpus, mirrored from `go/xmlconf_test.go` |
 | `tests/error_codes_test.rs` | the twenty error codes, read out of `ts/src/xml.ts` and `../tabnas.plugin.json` and compared with the catalogue an installed parser carries |
 | `tests/version_test.rs` | `Cargo.toml`, `VERSION` and `ts/package.json` must agree |
+| `tests/translate_test.rs` | the translation parts: the render the embedded manifest names is the one `render_text()` embeds, the manifest's shapes and loss lines, and every render definition named `xml-...` |
 | `tests/common/mod.rs` | the value normaliser and the fixture unescape both suites share |
 | `README.md` | the crate front page; gated prose, listed in `ts/scripts/gated-docs.cjs` and so checked by `ts/test/docs.test.js` and `make prose` |
 
