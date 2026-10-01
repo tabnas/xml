@@ -17,10 +17,10 @@
 ; and the Rust reader after it, so each is accepted anywhere after
 ; `name`, and none is written, since a reader derives them again. Any
 ; other member, a member out of its place, a root that is not an
-; element, a name that is not a string, attributes that are not an
-; object, children that are not an array, an attribute whose value is an
-; object or an array, and a child that is an array fail with
-; INPUT_INVALID, naming what was met.
+; element, a name, localName, prefix, namespace, space or lang that is
+; not a string, attributes that are not an object, children that are not
+; an array, an attribute whose value is an object or an array, and a
+; child that is an array fail with INPUT_INVALID, naming what was met.
 ;
 ; An element with no children is written `<name a="v"/>`, and otherwise
 ; `<name a="v">`, its children, `</name>`: the opening tag's `>` is held
@@ -33,7 +33,10 @@
 ; `&#13;`, `&#9;` and `&#10;`, since a reader normalises a bare one
 ; away. A number or a boolean met where XML wants text, which a tree
 ; from another format can hold, is written as its text, and null as
-; empty text. A name is written as it is: the render has no character
+; empty text. An empty text child is written as an empty CDATA section,
+; `<![CDATA[]]>`, which the reader builds as the empty string child it
+; was, where nothing at all would read back as no child. A name is
+; written as it is: the render has no character
 ; test, so a name no XML parser accepts, or a control character no XML
 ; document may hold, passes through unchanged. No XML declaration is
 ; written, and the document ends with one line feed.
@@ -84,11 +87,20 @@ def xml-text [value]
 
 ; Character data: `&`, `<` and `>` escaped, and a carriage return as a
 ; character reference, since a bare one is read as a line feed.
-def xml-chars [value]
+def xml-chars [text]
   replace-text "\r" "&#13;"
     replace-text ">" "&gt;"
       replace-text "<" "&lt;"
-        replace-text "&" "&amp;" (xml-text value)
+        replace-text "&" "&amp;" text
+
+; A text child: its character data, or an empty CDATA section when the
+; text is empty, since the reader builds an empty string child from one
+; and no child from nothing.
+def xml-child [value]
+  let [text (xml-text value)]
+    match text
+      case "" "<![CDATA[]]>"
+      case _ (xml-chars text)
 
 ; An attribute's value, between double quotes: `&`, `<` and `"` escaped,
 ; and a tab, a line feed and a carriage return as character references,
@@ -121,9 +133,9 @@ def xml-annotation [name s]
     case "lang" (transition (push :lang s) [])
     case _ (xml-wrong-member name)
 
-; A value met where the tree's shape has no place for it: a container
-; where a string is due, a scalar where a container is due, a value
-; where a key is due, or a root that is not an element.
+; A value met where the tree's shape has no place for it: one that is
+; not a string where a string is due, a scalar where a container is due,
+; a value where a key is due, or a root that is not an element.
 def xml-misplaced [s]
   match (xml-top s)
     case :none (fail "the tree is not an XML element: an element is an object whose members are name, localName, attributes and children")
@@ -137,6 +149,13 @@ def xml-misplaced [s]
     case :attributes-start (fail "the tree is not an XML element: its attributes are not an object")
     case :children-start (fail "the tree is not an XML element: its children are not an array")
     case _ (fail "the events hold a value where a key is due, which a tree's never do")
+
+; A member whose value is read and not written, which must still be a
+; string: the state after it, or the failure naming it.
+def xml-string [value next s]
+  match (kind value)
+    case :string (transition next [])
+    case _ (xml-misplaced s)
 
 ; A key, in the phase that awaits it: an element's next member, or an
 ; attribute's name, written with its opening quote.
@@ -164,22 +183,22 @@ def xml-key [name s]
 
 ; A scalar, in the phase that awaits it: the name, which opens the tag
 ; and goes under the phase for the close tag; an attribute's value,
-; closed with its quote; character data, after the held `>` when it is
-; the first child; or a member that is read and not written.
+; closed with its quote; a text child, after the held `>` when it is the
+; first child; or a member that is read and not written.
 def xml-scalar [value s]
   match (xml-top s)
     case :name
       match (kind value)
         case :string (transition (push :local-key (push value (pop s))) ["<" value])
-        case _ (fail "the tree is not an XML element: its name is not a string")
-    case :local (transition (xml-mark :attributes-key s) [])
+        case _ (xml-misplaced s)
+    case :local (xml-string value (xml-mark :attributes-key s) s)
     case :attribute (transition (xml-mark :attribute-key s) [(xml-attr value) "\""])
-    case :first-child (transition (xml-mark :child s) [">" (xml-chars value)])
-    case :child (transition s [(xml-chars value)])
-    case :prefix (transition (pop s) [])
-    case :namespace (transition (pop s) [])
-    case :space (transition (pop s) [])
-    case :lang (transition (pop s) [])
+    case :first-child (transition (xml-mark :child s) [">" (xml-child value)])
+    case :child (transition s [(xml-child value)])
+    case :prefix (xml-string value (pop s) s)
+    case :namespace (xml-string value (pop s) s)
+    case :space (xml-string value (pop s) s)
+    case :lang (xml-string value (pop s) s)
     case _ (xml-misplaced s)
 
 ; An object: the root element, the attributes, or a child element, which

@@ -66,7 +66,7 @@
     "loss": [
       "Only an element tree is written, the one the reader builds: an object whose members are name, localName, attributes and children, with text and elements as children; any other tree is refused.",
       "The XML declaration, the DOCTYPE, comments and processing instructions are not kept: an entity the DOCTYPE declared is written as its replacement text, and an attribute it defaulted is written on the element.",
-      "CDATA sections are not kept: their text is written as escaped character data, and two texts the reader read either side of a CDATA section, a comment or a processing instruction read back as one.",
+      "CDATA sections are not kept: their text is written as escaped character data, and two texts the reader read either side of a CDATA section, a comment or a processing instruction read back as one; an empty text child is written as an empty CDATA section, the one spelling that reads back as one.",
       "Namespace prefixes are written as part of the name; localName, prefix, namespace, space and lang are not written, since a reader derives them again from the name and from the xmlns, xml:space and xml:lang attributes, which are kept.",
       "Entity and character references are written as their characters, escaped where XML requires; a carriage return, and a tab or a line feed in an attribute's value, are written as character references, since a bare one is normalised away when read.",
       "Attribute values are written double-quoted, and the quoting, the white space inside a tag and a byte order mark are not kept."
