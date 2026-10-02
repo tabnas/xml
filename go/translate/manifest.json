@@ -1,0 +1,75 @@
+{
+  "$schema": "https://tabnas.dev/schema/plugin.schema.json",
+  "name": "@tabnas/xml",
+  "go": "github.com/tabnas/xml/go",
+  "description": "XML 1.0 parsing for the tabnas engine, with namespaces and entities.",
+  "base": "@tabnas/jsonic",
+  "engine": "@tabnas/parser",
+  "grammar": "xml-grammar.jsonic",
+  "extensions": [
+    ".xml"
+  ],
+  "mediaTypes": [
+    "application/xml",
+    "text/xml"
+  ],
+  "languageId": "xml",
+  "pluginKind": "grammar",
+  "grammarKind": "closure",
+  "lexStream": "clean",
+  "syncGroups": [
+    "end",
+    "comma",
+    "close"
+  ],
+  "specDir": "test/spec",
+  "clib": {
+    "dir": "go/clib",
+    "library": "libtabnasxml",
+    "abi": "v1",
+    "errorCodes": [
+      "usage",
+      "grammar",
+      "handle",
+      "internal"
+    ]
+  },
+  "errorCodes": [
+    "xml_mismatched_tag",
+    "xml_invalid_tag",
+    "unterminated_comment",
+    "unterminated_cdata",
+    "unterminated_pi",
+    "unterminated_doctype",
+    "comment_double_dash",
+    "cdata_terminator_in_text",
+    "pi_target_invalid",
+    "lt_in_attr_value",
+    "bad_entity_ref",
+    "duplicate_attribute",
+    "invalid_xml_char",
+    "reserved_namespace",
+    "unbound_prefix",
+    "invalid_namespace_uri",
+    "undeclared_entity",
+    "unparsed_entity_ref",
+    "external_entity_in_attr",
+    "text_at_top_level"
+  ],
+  "docs": "https://tabnas.dev/docs/packages",
+  "repository": "https://github.com/tabnas/xml",
+  "versionSource": "ts/package.json",
+  "translate": {
+    "reads": "tree",
+    "writes": "tree",
+    "render": "alchemy/render.alc",
+    "loss": [
+      "Only an element tree is written, the one the reader builds: an object whose members are name, localName, attributes and children, with text and elements as children; any other tree is refused.",
+      "The XML declaration, the DOCTYPE, comments and processing instructions are not kept: an entity the DOCTYPE declared is written as its replacement text, and an attribute it defaulted is written on the element.",
+      "CDATA sections are not kept: their text is written as escaped character data, and two texts the reader read either side of a CDATA section, a comment or a processing instruction read back as one; an empty text child is written as an empty CDATA section, the one spelling that reads back as one.",
+      "Namespace prefixes are written as part of the name; localName, prefix, namespace, space and lang are not written, since a reader derives them again from the name and from the xmlns, xml:space and xml:lang attributes, which are kept.",
+      "Entity and character references are written as their characters, escaped where XML requires; a carriage return, and a tab or a line feed in an attribute's value, are written as character references, since a bare one is normalised away when read.",
+      "Attribute values are written double-quoted, and the quoting, the white space inside a tag and a byte order mark are not kept."
+    ]
+  }
+}

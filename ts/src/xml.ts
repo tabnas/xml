@@ -1711,3 +1711,6 @@ const VERSION = '0.7.10'
 export { Xml, decodeBOM, VERSION }
 
 export type { XmlOptions, XmlElement }
+
+export { translate } from './translate'
+export type { TranslationPart, TranslationParts } from './translate'
