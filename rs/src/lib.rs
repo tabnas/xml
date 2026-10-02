@@ -931,6 +931,41 @@ pub fn parse(src: &str) -> Result<Value, XmlError> {
     DEFAULT.get_or_init(make).parse(src)
 }
 
+/// One optional alchemy translation source and its explicit entry point.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TranslationPart {
+    /// The definition a host calls after linking the source.
+    pub entry: &'static str,
+    /// The source text, or `None` for an entry supplied by alchemy.
+    pub source: Option<&'static str>,
+}
+
+/// The package-local structural translation interface.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TranslationParts {
+    /// The complete `tabnas.plugin.json` text.
+    pub manifest: &'static str,
+    /// An optional lift from the grammar's events to its first read shape.
+    pub lift: Option<TranslationPart>,
+    /// An optional render from the write shape to text.
+    pub render: Option<TranslationPart>,
+}
+
+const TRANSLATION: TranslationParts = TranslationParts {
+    manifest: include_str!("../translate/manifest.json"),
+    lift: None,
+    render: Some(TranslationPart {
+        entry: "xml-render",
+        source: Some(include_str!("../translate/render.alc")),
+    }),
+};
+
+/// Return XML's immutable translation parts.
+#[must_use]
+pub const fn translate() -> Option<TranslationParts> {
+    Some(TRANSLATION)
+}
+
 /// The plugin's manifest, `tabnas.plugin.json`, as the repository carries
 /// it. Its `translate` object is what a host that translates reads: the
 /// shape XML is read as and written from (`tree`), the file that holds
@@ -943,7 +978,7 @@ pub fn parse(src: &str) -> Result<Value, XmlError> {
 /// assert!(tabnas_xml::manifest_text().contains("\"translate\""));
 /// ```
 pub fn manifest_text() -> &'static str {
-    include_str!("../translate/manifest.json")
+    TRANSLATION.manifest
 }
 
 /// XML's render, `alchemy/render.alc`, the file the manifest's
@@ -958,7 +993,10 @@ pub fn manifest_text() -> &'static str {
 /// assert!(tabnas_xml::render_text().contains("def xml-render [input]"));
 /// ```
 pub fn render_text() -> &'static str {
-    include_str!("../translate/render.alc")
+    match TRANSLATION.render {
+        Some(part) => part.source.unwrap_or_default(),
+        None => "",
+    }
 }
 
 /// The error templates, interpolated against the failing token's
