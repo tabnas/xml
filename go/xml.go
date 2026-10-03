@@ -72,6 +72,16 @@ var Defaults = map[string]any{
 	"embed":            false,
 }
 
+// xmlElementFields is the canonical TypeScript insertion order of an XML
+// element's members. The Go plugin builds elements as plain maps, so the maps
+// themselves cannot retain it. ParserSource reads this declaration from
+// ctx.Meta and uses it when it emits structural events. Annotation fields are
+// appended by namespace resolution after the four structural fields.
+var xmlElementFields = []any{
+	"name", "localName", "attributes", "children",
+	"prefix", "namespace", "space", "lang",
+}
+
 // Xml is the Jsonic plugin entry point. Register via:
 //
 //	j := jsonic.Make()
@@ -120,6 +130,11 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 	// Shared options installed in both modes: the custom matcher, the
 	// text-end character `<`, and the XML-specific error templates.
 	j.SetOptions(jsonic.Options{
+		Parse: &jsonic.ParseOptions{Prepare: map[string]func(*jsonic.Context){
+			"xml-fields": func(ctx *jsonic.Context) {
+				ctx.Meta["fields"] = xmlElementFields
+			},
+		}},
 		Lex: &jsonic.LexOptions{
 			Match: map[string]*jsonic.MatchSpec{
 				"xmltag": {Order: 100_000, Make: buildXmlTagMatcher(decode, declared, entitiesOn, strictEntities, embed, xigTin, xopTin, xclTin, xscTin)},
