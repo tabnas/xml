@@ -3,6 +3,7 @@ package tabnasxml
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -89,6 +90,24 @@ func TestSpec(t *testing.T) {
 			return fmt.Sprintf("row %d: %s", row.Line, row.Named("# name"))
 		},
 	}.Dir(t, dir)
+}
+
+func TestParserDeclaresElementFieldOrder(t *testing.T) {
+	j := jsonic.Make()
+	if err := j.Use(Xml); err != nil {
+		t.Fatal(err)
+	}
+	meta := map[string]any{}
+	if _, err := j.ParseMeta(`<a x="1">text</a>`, meta); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := meta["fields"].([]any)
+	if !ok {
+		t.Fatalf("fields metadata is %T", meta["fields"])
+	}
+	if !reflect.DeepEqual(got, xmlElementFields) {
+		t.Fatalf("fields metadata = %#v, want %#v", got, xmlElementFields)
+	}
 }
 
 // specUnescape is the one thing this repo does not take from the support
