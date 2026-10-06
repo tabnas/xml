@@ -5,7 +5,7 @@ This is understanding-oriented reading; for steps see the
 [tutorial](tutorial.md) and [how-to guide](guide.md); for exact
 signatures and options see the [reference](reference.md).
 
-## A grammar plugin on the Jsonic engine
+## A grammar plugin on the tabnas engine
 
 This package is not a standalone XML parser. It is a **plugin** for the
 `tabnas` parsing engine, the same engine that drives
@@ -57,15 +57,16 @@ The **parser** then consumes those tokens with four small rules:
 Each rule has open/close phases and short alternates with at most two
 tokens of lookahead, the engine's deterministic, no-backtracking model.
 The full grammar is small enough to read in one screen; it lives in the
-repository's top-level `xml-grammar.jsonic` and is embedded verbatim into
+repository's top-level `xml-grammar.jsonic` and is embedded as JSON into
 the source. The [railroad diagram](grammar.svg) is generated from this
 live grammar.
 
 ## The grammar is shared data
 
 The grammar text is authored once, in relaxed-JSON, in
-`xml-grammar.jsonic`. A build step (`embed-grammar.js`) splices it
-verbatim into `src/xml.ts`; the Go port mirrors the same rules. The
+`xml-grammar.jsonic`. A build step (`embed-grammar.js`) reads it with
+jsonic and writes it into `src/xml.ts` as JSON, so the plugin needs no
+jsonic to load it; the Go port mirrors the same rules. The
 function references in the grammar (the `@`-prefixed names like
 `@element-open`, `@child-text`, `@element-close`) are resolved at plugin
 time against a map of JavaScript callbacks that build the result tree and
@@ -82,13 +83,14 @@ surrounding parser is configured.
 **Pure-XML mode** (`embed: false`, the default) reconfigures the engine
 *around* the XML rules: the start rule becomes `xml`, the JSON structural
 tokens (`{ } [ ] : ,`) are unbound, the number/string/value/comment/space
-lexers are turned off, and Jsonic's now-unreachable value rules (`val`,
-`map`, `list`, `pair`, `elem`) are deleted from the grammar, so the
-parser, and the generated diagram, carry only what XML uses. The input is
-then pure XML.
+lexers are turned off, and any value rules jsonic installed first (`val`,
+`map`, `list`, `pair`, `elem`), unreachable now, are deleted from the
+grammar, so the parser, and the generated diagram, carry only what XML
+uses. The input is then pure XML, and the bare engine is all it needs.
 
-**Embed mode** (`embed: true`) leaves Jsonic's grammar intact and adds an
-XML literal as an alternate of the `val` rule. When the parser is looking
+**Embed mode** (`embed: true`) runs on an engine with jsonic installed
+first, and the plugin refuses to install on any other. It leaves jsonic's grammar intact and adds an XML literal as an
+alternate of the `val` rule. When the parser is looking
 for a value and sees `#XOP`/`#XSC`, it backtracks one token and pushes
 the `element` rule, building an XML subtree wherever a value was
 expected. This makes XML a first-class value type inside relaxed-JSON

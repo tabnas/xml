@@ -25,12 +25,17 @@
 //! # Ok::<(), tabnas_xml::XmlError>(())
 //! ```
 //!
-//! The plugin is layered on the relaxed-JSON grammar of
-//! [`tabnas_jsonic`], as the canonical plugin is layered on
-//! `@tabnas/jsonic`: `use(jsonic)` first, then `use(Xml)`. In the default
-//! pure-XML mode the XML rules replace the JSON value rules; in embed
-//! mode (`embed: true`) they sit beside them so an XML element can appear
-//! wherever a jsonic value can.
+//! [`make`], [`make_with`] and [`parse`] install the plugin on the bare
+//! engine, as `new Tabnas().use(Xml)` does in the canonical plugin and as
+//! Go's C library does with `tabnas.Make()`. In the default pure-XML mode
+//! the XML rules are the whole grammar, so nothing else is needed. Embed
+//! mode (`embed: true`) is the exception. It splices XML into the value
+//! rule of the relaxed-JSON jsonic grammar so an XML element can appear
+//! wherever a jsonic value can, so it needs a parser that already carries
+//! that grammar: install [`plugin`] or [`xml`] on a jsonic parser
+//! (`tabnas_jsonic::make()`, from the `tabnas-jsonic` crate), as the
+//! canonical plugin is installed after `use(jsonic)`. This crate does not
+//! depend on jsonic.
 //!
 //! TypeScript is canonical: `ts/src/xml.ts` defines behaviour, option
 //! names and defaults, and `xml-grammar.jsonic` at the repository root
@@ -74,10 +79,10 @@ pub use tabnas::TabnasError as XmlError;
 
 // --- BEGIN EMBEDDED xml-grammar.jsonic ---
 /// The grammar, as the JSON that `xml-grammar.jsonic` at the repository
-/// root parses to. The TypeScript plugin parses that file's text with
-/// jsonic at load time; this crate carries the parsed form so it needs no
-/// jsonic parse of its own to start, and `tests/xml_test.rs` holds the two
-/// to the same value.
+/// root parses to. The TypeScript plugin embeds the same JSON, written by
+/// `ts/embed-grammar.js`; this crate carries it by hand, so it needs no
+/// jsonic to read it, and `tests/xml_test.rs` holds the two to the same
+/// value.
 pub const GRAMMAR_TEXT: &str = r##"
 {
   "rule": {
@@ -182,6 +187,14 @@ pub const GRAMMAR_TEXT: &str = r##"
 /// plugin options.
 const PLUGIN_NAME: &str = "xml";
 
+/// What [`xml`] returns when embed mode is asked of a host without the
+/// jsonic grammar. Embed mode splices XML into jsonic's `val` rule; on any
+/// other host it would parse every document to nothing, so the plugin
+/// refuses to install instead. The same words as the TypeScript and Go
+/// plugins.
+const EMBED_NEEDS_JSONIC: &str = "xml: embed mode needs a jsonic host: install the xml plugin \
+     on a jsonic engine (tabnas_jsonic::make(), then use_plugin(tabnas_xml::plugin(), ...))";
+
 // The function references the grammar names, registered on the instance
 // before the document is installed. The two lifecycle hooks are wired by
 // name to their rule and phase when the rule is installed.
@@ -229,7 +242,10 @@ pub struct XmlOptions {
     /// tokens are dropped and every non-XML lexer is switched off. When
     /// true the jsonic grammar stays in place and an alternate is added
     /// to its `val` rule so a literal element (`<tag>...</tag>` or
-    /// `<tag/>`) appears wherever jsonic expects a value.
+    /// `<tag/>`) appears wherever jsonic expects a value. That needs a
+    /// parser that carries the jsonic grammar: install [`plugin`] on
+    /// `tabnas_jsonic::make()`. On any other host [`xml`] returns an
+    /// error and [`make_with`] panics.
     pub embed: bool,
 }
 
@@ -561,19 +577,26 @@ fn check_doc_text(token: Option<&Token>, context: &Context) -> Option<Token> {
 // The plugin
 // ---------------------------------------------------------------------------
 
-/// Install the XML grammar on `parser`, which should already carry the
-/// jsonic grammar (as [`make`] arranges): the port of the `Xml` plugin
+/// Install the XML grammar on `parser`: the port of the `Xml` plugin
 /// function.
 ///
 /// In pure mode the parser is reconfigured for XML alone: `xml` becomes
 /// the start rule, the JSON structural tokens and every non-XML lexer are
-/// switched off, and jsonic's value rules are removed. In embed mode the
-/// jsonic grammar stays and XML elements become values. Installation is
-/// idempotent: an instance that already carries the `xml` rule is left
-/// alone.
+/// switched off, and any jsonic value rules are removed, so the parser
+/// carries the four XML rules whether it started as the bare engine (as
+/// [`make`] arranges) or as a jsonic parser. In embed mode, on a jsonic
+/// parser, the jsonic grammar stays and XML elements become values.
+/// Installation is idempotent: an instance that already carries the
+/// `xml` rule is left alone.
+///
+/// # Errors
+///
+/// Embed mode on a parser without jsonic's `val` rule, the bare engine
+/// among them, is refused with a [`PluginError`] that starts
+/// `xml: embed mode needs a jsonic host`, and nothing is installed.
 ///
 /// ```
-/// let mut parser = tabnas_jsonic::make();
+/// let mut parser = tabnas::Tabnas::new();
 /// tabnas_xml::xml(&mut parser, &tabnas_xml::XmlOptions::default())?;
 /// assert_eq!(
 ///     parser.parse("<a x='1'/>")?.to_string(),
@@ -584,6 +607,9 @@ fn check_doc_text(token: Option<&Token>, context: &Context) -> Option<Token> {
 pub fn xml(parser: &mut Tabnas, options: &XmlOptions) -> Result<(), PluginError> {
     if parser.rules.contains_key("xml") {
         return Ok(());
+    }
+    if options.embed && !parser.rules.contains_key("val") {
+        return Err(PluginError(EMBED_NEEDS_JSONIC.to_string()));
     }
     let embed = options.embed;
     let namespaces = options.namespaces;
@@ -852,7 +878,7 @@ fn register_refs(parser: &mut Tabnas, namespaces: bool, strict_namespaces: bool,
 /// every native plugin is.
 ///
 /// ```
-/// let mut parser = tabnas_jsonic::make();
+/// let mut parser = tabnas::Tabnas::new();
 /// parser.use_plugin(tabnas_xml::plugin(), None)?;
 /// assert_eq!(
 ///     parser.parse("<a>&amp;</a>")?.to_string(),
@@ -867,12 +893,21 @@ pub fn plugin() -> Plugin {
     .with_defaults(XmlOptions::default().to_value())
 }
 
-/// Build an XML parser with caller options: the jsonic grammar, then this
-/// plugin, the `new Tabnas().use(jsonic).use(Xml, options)` of the
-/// canonical plugin and the `jsonic.Make()` plus `UseDefaults` of Go.
+/// Build an XML parser with caller options: the engine, then this
+/// plugin, the `new Tabnas().use(Xml, options)` of the canonical plugin
+/// and the `tabnas.Make()` plus `UseDefaults` of Go's C library.
 ///
-/// Infallible by design: the grammar documents are fixed literals, so a
-/// failure here is a bug in this crate rather than anything a caller did.
+/// Infallible for every option but one: the grammar documents are fixed
+/// literals, so any other failure here is a bug in this crate rather than
+/// anything a caller did.
+///
+/// # Panics
+///
+/// When `options.embed` is true. The engine carries no grammar of its
+/// own, so embed mode has no jsonic document to embed XML in, and a
+/// parser built anyway would parse every document to nothing. For embed
+/// mode, install [`plugin`] on a jsonic parser (`tabnas_jsonic::make()`)
+/// instead.
 ///
 /// ```
 /// let parser = tabnas_xml::make_with(&tabnas_xml::XmlOptions {
@@ -886,10 +921,11 @@ pub fn plugin() -> Plugin {
 /// # Ok::<(), tabnas_xml::XmlError>(())
 /// ```
 pub fn make_with(options: &XmlOptions) -> Tabnas {
-    let mut parser = tabnas_jsonic::make();
-    parser
-        .use_plugin(plugin(), Some(options.to_value()))
-        .expect("the xml grammar documents are fixed and valid");
+    let mut parser = Tabnas::new();
+    if let Err(error) = parser.use_plugin(plugin(), Some(options.to_value())) {
+        // Embed mode, refused by `xml` on the bare engine; or a bug here.
+        panic!("tabnas_xml::make_with: {error}");
+    }
     parser
 }
 

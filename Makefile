@@ -73,9 +73,10 @@ clean-rs:
 # these fails that test.
 #
 # Unlike publish-go it neither commits nor tags. There is nothing to
-# release: the crate depends on the engine and the jsonic base grammar
-# by path, and crates.io does not accept a path dependency, so
-# tabnas-xml is not published. Only the constants need to stay in step.
+# release: the crate depends on the engine (and, for its tests, the
+# jsonic grammar) by path, and crates.io does not accept a path
+# dependency, so tabnas-xml is not published. Only the constants need to
+# stay in step.
 version-rs:
 	@test -n "$(V)" || (echo "Usage: make version-rs V=x.y.z" && exit 1)
 	sed -i.bak 's/^version = ".*"/version = "$(V)"/' rs/Cargo.toml

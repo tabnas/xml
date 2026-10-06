@@ -11,24 +11,21 @@ list, see the [reference](reference.md).
 
 ## 1. Install
 
-The plugin runs on the `tabnas` parser engine with the `jsonic`
-relaxed-JSON grammar as its base, so install all three:
+The plugin runs on the `tabnas` parser engine, so install both:
 
 ```bash
-npm install @tabnas/parser @tabnas/jsonic @tabnas/xml
+npm install @tabnas/parser @tabnas/xml
 ```
 
 ## 2. Parse an element
 
-`Xml` is a plugin. Apply it to a `Tabnas` engine that already has
-`jsonic` installed, then call `parse`:
+`Xml` is a plugin. Apply it to a `Tabnas` engine, then call `parse`:
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
-const { jsonic } = require('@tabnas/jsonic')
 const { Xml } = require('@tabnas/xml')
 
-const xml = new Tabnas().use(jsonic).use(Xml)
+const xml = new Tabnas().use(Xml)
 
 xml.parse('<a>hello</a>')
 // => { name: 'a', localName: 'a', attributes: {}, children: ['hello'] }
@@ -46,10 +43,9 @@ In TypeScript the import is the same, and the result is typed as
 
 ```ts
 import { Tabnas } from '@tabnas/parser'
-import { jsonic } from '@tabnas/jsonic'
 import { Xml, XmlElement } from '@tabnas/xml'
 
-const xml = new Tabnas().use(jsonic).use(Xml)
+const xml = new Tabnas().use(Xml)
 const doc = xml.parse('<a/>') as XmlElement
 ```
 
@@ -63,10 +59,9 @@ The tree mirrors that structure exactly:
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
-const { jsonic } = require('@tabnas/jsonic')
 const { Xml } = require('@tabnas/xml')
 
-const xml = new Tabnas().use(jsonic).use(Xml)
+const xml = new Tabnas().use(Xml)
 
 xml.parse('<greeting lang="en">Hello, <b>world</b>!</greeting>')
 // => {
@@ -93,10 +88,9 @@ text and attribute values:
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
-const { jsonic } = require('@tabnas/jsonic')
 const { Xml } = require('@tabnas/xml')
 
-const xml = new Tabnas().use(jsonic).use(Xml)
+const xml = new Tabnas().use(Xml)
 
 xml.parse('<a>Tom &amp; Jerry</a>').children   // => ['Tom & Jerry']
 ```
@@ -109,10 +103,9 @@ names, a `prefix`):
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
-const { jsonic } = require('@tabnas/jsonic')
 const { Xml } = require('@tabnas/xml')
 
-const xml = new Tabnas().use(jsonic).use(Xml)
+const xml = new Tabnas().use(Xml)
 
 const entry = xml.parse('<entry xmlns="http://www.w3.org/2005/Atom"><title>Example</title></entry>')
 entry.namespace                  // => 'http://www.w3.org/2005/Atom'
@@ -147,10 +140,9 @@ are a common case:
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
-const { jsonic } = require('@tabnas/jsonic')
 const { Xml } = require('@tabnas/xml')
 
-const xml = new Tabnas().use(jsonic).use(Xml)
+const xml = new Tabnas().use(Xml)
 
 let code = ''
 try {

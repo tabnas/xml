@@ -9,11 +9,11 @@ Every recipe starts from a parser built like this:
 
 ```go
 import (
-	tabnasjsonic "github.com/tabnas/jsonic/go"
+	tabnas "github.com/tabnas/parser/go"
 	tabnasxml "github.com/tabnas/xml/go"
 )
 
-j := tabnasjsonic.Make()
+j := tabnas.Make()
 if err := j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults); err != nil {
 	panic(err)
 }
@@ -57,7 +57,7 @@ Declare extra named entities with the `customEntities` option (itself a
 named reference appears:
 
 ```go
-j := tabnasjsonic.Make()
+j := tabnas.Make()
 j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults, map[string]any{
 	"customEntities": map[string]string{"nbsp": " ", "copy": "©"},
 })
@@ -74,7 +74,7 @@ By default a reference to an undeclared named entity is a hard error
 sequences should pass through untouched, set `strictEntities: false`:
 
 ```go
-j := tabnasjsonic.Make()
+j := tabnas.Make()
 j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults, map[string]any{"strictEntities": false})
 
 result, _ := j.Parse(`<a>&unknown;</a>`)
@@ -91,7 +91,7 @@ To keep text and attribute values byte-for-byte as written, set
 `entities: false`:
 
 ```go
-j := tabnasjsonic.Make()
+j := tabnas.Make()
 j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults, map[string]any{"entities": false})
 
 result, _ := j.Parse(`<a>&amp;</a>`)
@@ -106,7 +106,7 @@ rejects unbound prefixes. To skip it (leaving `xmlns` declarations as
 plain attributes), set `namespaces: false`:
 
 ```go
-j := tabnasjsonic.Make()
+j := tabnas.Make()
 j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults, map[string]any{"namespaces": false})
 
 result, _ := j.Parse(`<a xmlns="http://example.com"/>`)
@@ -150,7 +150,10 @@ b := a["children"].([]any)[0].(map[string]any)
 
 With `embed: true` the plugin keeps Jsonic's relaxed-JSON grammar and
 adds XML literals as values: an `<tag>…</tag>` (or `<tag/>`) may appear
-anywhere Jsonic expects a value. Plain Jsonic input is unaffected:
+anywhere Jsonic expects a value. The grammar comes from
+`github.com/tabnas/jsonic/go`, imported as `tabnasjsonic`, so build on a
+jsonic instance instead of the bare engine. Plain Jsonic input is
+unaffected:
 
 ```go
 j := tabnasjsonic.Make()

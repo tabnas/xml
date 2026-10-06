@@ -12,12 +12,13 @@ ones, numeric character references, caller-supplied entities and
 sections, comments, processing instructions, `<!ATTLIST>` attribute
 defaults, and `xml:space` and `xml:lang` inheritance.
 
-It is layered on the relaxed-JSON grammar of
-[`tabnas-jsonic`](https://github.com/tabnas/jsonic), as the canonical
-plugin is layered on `@tabnas/jsonic`. In the default pure-XML mode the
-XML rules replace the JSON value rules, so a document is XML and nothing
-else. In embed mode the two sit side by side, so an XML element can
-appear wherever a jsonic value can.
+It is installed on the bare engine by `parse`, `make` and `make_with`,
+as the canonical plugin is installed with `new Tabnas().use(Xml)`. In the
+default pure-XML mode the XML rules are the whole grammar, so a document
+is XML and nothing else. Embed mode extends the relaxed-JSON grammar of
+[`tabnas-jsonic`](https://github.com/tabnas/jsonic) instead: installed on
+a jsonic parser, the two sit side by side, so an XML element can appear
+wherever a jsonic value can.
 
 This is the Rust port of the canonical TypeScript implementation in
 [`../ts`](../ts); the TypeScript version is authoritative and this crate
@@ -63,7 +64,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 To install the plugin on an instance you already have, so XML sits
-beside another grammar, use the engine's plugin entry point:
+beside another grammar, use the engine's plugin entry point. Here the
+other grammar is jsonic, which embed mode needs: on any other parser the
+plugin refuses to install, and `make_with` panics. So this example also
+needs `tabnas-jsonic` among your dependencies:
 
 ```rust
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -90,23 +94,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Install
 
-The `tabnas` and `tabnas-jsonic` crates are not published to a registry,
-so they are consumed as **sibling checkouts**, the standard tabnas
-development model. Clone `https://github.com/tabnas/parser` and
-`https://github.com/tabnas/jsonic` next to this repository and point at
-them:
+The `tabnas` crate is consumed as a **sibling checkout**, the standard
+tabnas development model. Clone `https://github.com/tabnas/parser` next
+to this repository and point at it:
 
 ```toml
 [dependencies]
 tabnas-xml = { path = "../xml/rs" }
-tabnas-jsonic = { path = "../jsonic/rs" }
 tabnas = { package = "tabnas-parser", path = "../parser/rs" }
 ```
 
-All three entries are needed. A crate's dependencies are not passed on
-to its dependents, so `tabnas-xml` alone does not put `tabnas` or
-`tabnas-jsonic` in your extern prelude, and the examples above that name
-them would not resolve. Only `XmlError` is re-exported.
+Both entries are needed to name the engine. A crate's dependencies are not
+passed on to its dependents, so `tabnas-xml` alone does not put `tabnas`
+in your extern prelude, and the examples above that name it would not
+resolve. Only `XmlError` is re-exported. `tabnas-jsonic` is not needed,
+except by the embed-mode example: that one does not build without
+`tabnas-jsonic = { path = "../jsonic/rs" }` and a clone of
+`https://github.com/tabnas/jsonic`.
 
 ## Differences from the canonical TypeScript
 
@@ -158,14 +162,14 @@ engine; the last is a choice this port made, and it is marked as one:
 - **The grammar text is public. (A CHOICE, not a constraint.)**
   `GRAMMAR_TEXT` is exported so a caller can inspect the installed rule
   chain, and the suite compares it with `../xml-grammar.jsonic`. The
-  canonical plugin keeps its copy private and parses it at load time.
+  canonical plugin keeps its copy of the same JSON private.
   Nothing in Rust required this; it is a wider public surface taken
   deliberately, and it could be withdrawn without changing any parse.
 
 ## Build and test
 
-The engine and the jsonic base grammar are path dependencies on sibling
-checkouts, so there is nothing to fetch:
+The engine, and for the tests the jsonic grammar, are path dependencies
+on sibling checkouts, so there is nothing to fetch:
 
 ```bash
 cargo test --all-targets && cargo test --doc

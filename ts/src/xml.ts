@@ -1,9 +1,9 @@
 /* Copyright (c) 2021-2025 Richard Rodger, MIT License */
 
-// The engine is the tabnas parser; jsonic supplies the relaxed-JSON
-// grammar that the embedded grammar text is authored in.
+// The engine is the tabnas parser. The grammar is authored in jsonic
+// (xml-grammar.jsonic) but embedded below as JSON, so no runtime here
+// loads jsonic.
 import { Tabnas } from '@tabnas/parser'
-import { jsonic } from '@tabnas/jsonic'
 
 // Engine types used by plugins (re-exported by @tabnas/parser).
 import {
@@ -80,61 +80,125 @@ type XmlOptions = {
   embed: boolean
 }
 
+// The grammar: xml-grammar.jsonic at the repository root, as JSON.
+// Written by ts/embed-grammar.js (`npm run embed`), which reads the jsonic
+// text at build time; ts/test/grammar-json.test.ts fails when this copy is
+// stale. Edit the .jsonic file and re-run the script, never this block.
 // --- BEGIN EMBEDDED xml-grammar.jsonic ---
-const grammarText = `
-# XML Grammar Definition (elements + attributes + mixed content)
-# Parsed by a standard Jsonic instance and passed to jsonic.grammar()
-# Function references (@ prefixed) are resolved against the refs map
-#
-# Token naming:
-#   #XOP - XML open tag, e.g. <tagname attr="value">
-#   #XCL - XML close tag, e.g. </tagname>
-#   #XSC - XML self-close tag, e.g. <tagname attr="value"/>
-#   #XIG - comment / processing instruction / DOCTYPE (ignored)
-#   #TX  - text content between tags (CDATA included)
-#   #ZZ  - end of input
-
+const grammarJson = `
 {
-  rule: xml: open: [
-    { s: '#ZZ' }
-    { s: '#TX' r: xml a: '@doc-text-open' }
-    { p: element c: '@no-root-yet' }
-  ]
-  rule: xml: close: [
-    { s: '#ZZ' g: end }
-    { s: '#TX' r: xml a: '@doc-text-close' g: comma }
-  ]
-
-  rule: element: open: [
-    { s: '#XSC' a: '@element-selfclose' u: { selfclose: 1 } }
-    { s: '#XOP' p: content a: '@element-open' }
-  ]
-  rule: element: close: [
-    { c: '@element-is-selfclosed' }
-    { s: '#XCL' a: '@element-close' g: close }
-  ]
-
-  rule: content: open: [
-    { s: '#XCL' b: 1 }
-    { p: child }
-  ]
-  rule: content: close: [
-    { s: '#XCL' b: 1 g: close }
-    { r: content }
-  ]
-
-  rule: child: open: [
-    { s: '#TX' a: '@child-text' }
-    { s: '#XOP' b: 1 p: element }
-    { s: '#XSC' b: 1 p: element }
-  ]
+  "rule": {
+    "xml": {
+      "open": [
+        {
+          "s": "#ZZ"
+        },
+        {
+          "s": "#TX",
+          "r": "xml",
+          "a": "@doc-text-open"
+        },
+        {
+          "p": "element",
+          "c": "@no-root-yet"
+        }
+      ],
+      "close": [
+        {
+          "s": "#ZZ",
+          "g": "end"
+        },
+        {
+          "s": "#TX",
+          "r": "xml",
+          "a": "@doc-text-close",
+          "g": "comma"
+        }
+      ]
+    },
+    "element": {
+      "open": [
+        {
+          "s": "#XSC",
+          "a": "@element-selfclose",
+          "u": {
+            "selfclose": 1
+          }
+        },
+        {
+          "s": "#XOP",
+          "p": "content",
+          "a": "@element-open"
+        }
+      ],
+      "close": [
+        {
+          "c": "@element-is-selfclosed"
+        },
+        {
+          "s": "#XCL",
+          "a": "@element-close",
+          "g": "close"
+        }
+      ]
+    },
+    "content": {
+      "open": [
+        {
+          "s": "#XCL",
+          "b": 1
+        },
+        {
+          "p": "child"
+        }
+      ],
+      "close": [
+        {
+          "s": "#XCL",
+          "b": 1,
+          "g": "close"
+        },
+        {
+          "r": "content"
+        }
+      ]
+    },
+    "child": {
+      "open": [
+        {
+          "s": "#TX",
+          "a": "@child-text"
+        },
+        {
+          "s": "#XOP",
+          "b": 1,
+          "p": "element"
+        },
+        {
+          "s": "#XSC",
+          "b": 1,
+          "p": "element"
+        }
+      ]
+    }
+  }
 }
 `
 // --- END EMBEDDED xml-grammar.jsonic ---
 
 
+// Embed mode splices XML into jsonic's `val` rule, so it needs an engine
+// that already carries the jsonic grammar. Installed on any other host it
+// would parse every document to nothing, so it refuses to install instead.
+const EMBED_NEEDS_JSONIC =
+  'xml: embed mode needs a jsonic host: install the xml plugin on a ' +
+  'jsonic engine (new Tabnas().use(jsonic).use(Xml, { embed: true }))'
+
 const Xml: Plugin = (tn: Tabnas, options: XmlOptions) => {
   const embed = options.embed === true
+  if (embed && null == (tn.rule() as Record<string, unknown>).val) {
+    throw new Error(EMBED_NEEDS_JSONIC)
+  }
   // Namespace-constraint checking (unbound prefixes) is opt-in — XML
   // 1.0 well-formedness does not require prefixes to be bound.
   const strictNamespaces = options.strictNamespaces === true
@@ -362,10 +426,10 @@ Expected </{openname}> but found </{closename}>.`,
     '@element-is-selfclosed': (r: Rule) => true === !!r.u.selfclose,
   }
 
-  // Parse embedded grammar definition and wire refs. The embedded
-  // relaxed-.jsonic grammar text is parsed by a jsonic-grammar engine,
-  // then installed on this tabnas instance.
-  const grammarDef = new Tabnas().use(jsonic).parse(grammarText)
+  // Read the embedded grammar and wire refs. ts/embed-grammar.js wrote
+  // it as JSON at build time, so it needs no jsonic to read, and a fresh
+  // object per install keeps one instance's refs off another's.
+  const grammarDef = JSON.parse(grammarJson)
   grammarDef.ref = refs
   tn.grammar(grammarDef)
 

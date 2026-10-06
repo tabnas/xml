@@ -67,10 +67,14 @@ inheritance). It also handles BOM-prefixed input (`decodeBOM` transcodes
 UTF-8 / UTF-16 / UTF-32) so non-ASCII tag names round-trip.
 
 It is **not** a standalone engine. The grammar is authored in the
-relaxed-JSON jsonic dialect (`xml-grammar.jsonic`, at the repo root) and installed on a
-[`@tabnas/parser`](https://github.com/tabnas/parser) engine that has the
-[`@tabnas/jsonic`](https://github.com/tabnas/jsonic) grammar already
-loaded — you `use(jsonic)` first, then `use(Xml)`. The plugin contributes
+relaxed-JSON jsonic dialect (`xml-grammar.jsonic`, at the repo root),
+shipped as JSON, and installed on a
+[`@tabnas/parser`](https://github.com/tabnas/parser) engine:
+`new Tabnas().use(Xml)`. No port needs
+[`@tabnas/jsonic`](https://github.com/tabnas/jsonic) at run time (the
+maintainer's ruling of 2026-10-06); only embed mode does, on an engine
+the caller has already given jsonic (`use(jsonic)` first, then
+`use(Xml, { embed: true })`). The plugin contributes
 XML tokens (`#XOP` open tag, `#XCL` close tag, `#XSC` self-close, `#XIG`
 ignored markup, `#TX` text/CDATA) and a four-rule grammar chain
 (`xml` → `element` → `content` → `child`); `xml` is the start rule.
@@ -81,24 +85,40 @@ strings and nested elements.
 
 ```typescript
 import { Tabnas } from '@tabnas/parser'
-import { jsonic } from '@tabnas/jsonic'
 import { Xml } from '@tabnas/xml'
 
-new Tabnas().use(jsonic).use(Xml)
+new Tabnas().use(Xml)
   .parse('<greeting lang="en">Hello, <b>world</b>!</greeting>')
 ```
 
 The plugin has two modes (the `embed` option). In the default pure-XML
-mode it makes `xml` the document start rule and the relaxed-JSON value
-rules are dead; in **embed mode** (`embed: true`) it leaves jsonic's `val`
+mode it makes `xml` the document start rule, and the relaxed-JSON value
+rules, if jsonic installed any, are dead; in **embed mode**
+(`embed: true`, on an engine with jsonic) it leaves jsonic's `val`
 wrapper in place so XML can appear inside jsonic source.
+
+**Embed mode fails fast without a jsonic host, in every port** (the
+maintainer's ruling of 2026-10-06). The plugin checks for jsonic's `val`
+rule, the one rule embed mode extends, before it changes anything; on a
+host without it (the bare engine, or jsonic installed after the plugin)
+it refuses with an error that starts
+`xml: embed mode needs a jsonic host: install the xml plugin on a jsonic engine`:
+TypeScript's `use()` throws, Go's `Use`/`UseDefaults` return it, Rust's
+`xml()`/`use_plugin` return it as a `PluginError`, and Rust's
+`make_with(&XmlOptions { embed: true, .. })`, whose signature returns a
+`Tabnas`, panics with it. Before the ruling such a parser installed and
+then parsed every document to nothing. The tests that pin it:
+`embed mode refuses a host without jsonic` in `ts/test/xml.test.ts`,
+`TestEmbedNeedsAJsonicHost` in `go/embed_test.go`, and
+`embed_mode_refuses_a_host_without_jsonic` and
+`make_with_panics_in_embed_mode` in `rs/tests/xml_test.rs`.
 
 ## Repository map
 
 | Path | What it is |
 |---|---|
 | [`ts/`](ts/) | **Canonical** TypeScript implementation — the `@tabnas/xml` package. Plugin source in [`ts/src/xml.ts`](ts/src/xml.ts) (single file). Exports `Xml`, `decodeBOM`, `VERSION`, and the `XmlOptions` / `XmlElement` types. |
-| [`xml-grammar.jsonic`](xml-grammar.jsonic) | The grammar definition, authored in jsonic syntax, at the **repo root** (not under `ts/`). `ts/embed-grammar.js` inlines it into `src/xml.ts` between `// --- BEGIN/END EMBEDDED xml-grammar.jsonic ---` markers as a `grammarText` template literal. Edit the `.jsonic` file, not the embedded copy. The Rust crate carries the same grammar as JSON in `rs/src/lib.rs` between the same markers; `embed-grammar.js` does NOT write it (that script has one target and embeds raw jsonic text, so a Rust arm would not be a mechanical extension), and `rs/tests/xml_test.rs` holds the two to the same value instead. |
+| [`xml-grammar.jsonic`](xml-grammar.jsonic) | The grammar definition, authored in jsonic syntax, at the **repo root** (not under `ts/`). `ts/embed-grammar.js` (`npm run embed`) reads it with `@tabnas/jsonic`, at build time, and writes it into `src/xml.ts` as JSON, between `// --- BEGIN/END EMBEDDED xml-grammar.jsonic ---` markers, as a `grammarJson` template literal the plugin reads with `JSON.parse`. So no runtime loads jsonic. The output is deterministic (`JSON.stringify`, two-space indent, LF; `.gitattributes` pins `ts/src/xml.ts` to `eol=lf`), and `ts/test/grammar-json.test.ts` regenerates it and fails when the committed copy is stale, so the script is deliberately NOT part of `npm run build`: a build that rewrote the JSON would make that test compare the script with itself. Edit the `.jsonic` file, run `npm run embed`, and commit both. The Rust crate carries the same JSON in `rs/src/lib.rs` between the same markers, by hand (byte for byte what the script writes today); `embed-grammar.js` does not write it, and `rs/tests/xml_test.rs` holds the two to the same value. |
 | [`tabnas.plugin.json`](tabnas.plugin.json) | Machine-readable plugin descriptor — name, base, grammar, extensions, error codes. Consumed by agent tooling. It deliberately carries **no version**: `versionSource` names `ts/package.json` instead, so this file cannot become a fourth place for the version to drift. Keep `errorCodes` in step with the `error` table in `ts/src/xml.ts`. Its `translate` object names the render below, with the loss lines a host prints. |
 | [`alchemy/render.alc`](alchemy/render.alc) | **XML's render**, an [alchemy](https://github.com/tabnas/alchemy) library whose entry point `xml-render` writes an element tree's events, the shape the reader builds, as one XML document, and refuses any other tree with the reason. Every definition is named `xml-...`. The Rust crate embeds it and the manifest as `render_text()` and `manifest_text()` from its own copies in `rs/translate/`: change the root file, then copy it there; `rs/tests/translate_test.rs` holds the two together. The round trip that runs the render (every fixture read, written and read back) needs alchemy, which this repository does not depend on, so it runs in the host's suite. |
 | [`go/`](go/) | Go port — `github.com/tabnas/xml/go`. Plugin in [`go/xml.go`](go/xml.go) (single file); `const VERSION` lives there. Exports the `Xml` plugin func, a `Defaults` options map and `VERSION`. |
@@ -116,18 +136,23 @@ the gated pages named in `ts/scripts/gated-docs.cjs`.
 
 ## The tabnas engine dependency
 
-All three runtimes depend on the unpublished `@tabnas` siblings via a
-**sibling checkout** (the standard tabnas dev model until the packages
-publish tagged releases). Unlike most grammar plugins, this one depends on
-**both** the engine and the jsonic grammar:
+All three runtimes depend on the `@tabnas` siblings via a
+**sibling checkout** (the standard tabnas dev model). At run time every
+port depends on the engine alone; the jsonic grammar is a development
+dependency in all three, for the tests (and, in TypeScript, the embed
+step). That is the maintainer's ruling of 2026-10-06, which removed
+jsonic from the TypeScript and Rust runtimes:
 
-- TypeScript (`ts/package.json`): `@tabnas/parser` is a `peerDependency`
-  (`">=2"`); `@tabnas/jsonic` is also a `peerDependency`, pinned as
-  `file:../../jsonic/ts`. Both are mirrored as `file:` devDependencies for
+- TypeScript (`ts/package.json`): `@tabnas/parser` is the one
+  `peerDependency` (`">=0"`), mirrored as a `"*"` devDependency for
   local builds (npm >=7 / Node >=24 auto-installs peers; `engines.node`
-  is `">=24"`). `@tabnas/debug` and `@tabnas/railroad` are **dev-only**
-  `file:` devDependencies — debug for the `debug-model` composition test,
-  railroad to regenerate `ts/doc/grammar.{svg,txt}`.
+  is `">=24"`). `@tabnas/jsonic` is a **dev-only** devDependency:
+  `embed-grammar.js` reads `xml-grammar.jsonic` with it, and the tests
+  build their parsers as `new Tabnas().use(jsonic).use(Xml)` and
+  exercise embed mode. `@tabnas/debug`, `@tabnas/railroad` and
+  `@tabnas/support` are **dev-only** too — debug for the `debug-model`
+  composition test, railroad to regenerate `ts/doc/grammar.{svg,txt}`,
+  support for the shared fixture runner.
 - Go (`go/go.mod`): requires `github.com/tabnas/jsonic/go`,
   `github.com/tabnas/parser/go` and `github.com/tabnas/support/go`, with
   `github.com/tabnas/json/go` indirect, and carries no `replace`.
@@ -137,13 +162,17 @@ publish tagged releases). Unlike most grammar plugins, this one depends on
   (`host.Make()`, host `github.com/tabnas/parser/go`; admin's
   `tasks/clib-rollout.tsv`). jsonic is required only for the tests, which
   install the plugin on a jsonic engine.
-- Rust (`rs/Cargo.toml`): `tabnas = { package = "tabnas-parser", path = "../../parser/rs" }` and
-  `tabnas-jsonic = { path = "../../jsonic/rs" }`, plus the
-  dev-dependency `tabnas-support = { path = "../../support/rs" }` for
-  the shared fixture runner. jsonic brings `tabnas-json` from
-  `../../json/rs`, so that checkout is needed too. `rs/Cargo.lock` is
-  committed, and `ci/rust/run.sh` exempts exactly those four sibling
-  entries when it diffs it.
+- Rust (`rs/Cargo.toml`): `tabnas = { package = "tabnas-parser", path = "../../parser/rs" }`
+  is the one runtime dependency, and `make`, `make_with` and `parse`
+  build on it (`Tabnas::new()`), as Go's C library does. The
+  dev-dependencies are `tabnas-support = { path = "../../support/rs" }`
+  for the shared fixture runner and
+  `tabnas-jsonic = { path = "../../jsonic/rs" }` for the tests, which
+  read `xml-grammar.jsonic`, run the fixtures on a jsonic parser as the
+  other two suites do, and exercise embed mode. jsonic brings
+  `tabnas-json` from `../../json/rs`, so that checkout is needed too.
+  `rs/Cargo.lock` is committed, and `ci/rust/run.sh` exempts exactly
+  those four sibling entries when it diffs it.
 
 Clone `https://github.com/tabnas/jsonic` and `https://github.com/tabnas/parser`
 (plus `debug` / `railroad` for the composition test and diagram) as siblings
@@ -182,7 +211,7 @@ builds them first.
    `dtd-attlist`, `dtd-entities` and `xmlspace-lang` were running under
    TypeScript only. Do not reintroduce a hand-maintained list.)
 4. Keep the three grammars aligned. The grammar text is shared in spirit
-   (`xml-grammar.jsonic` is parsed at runtime in TS; Go reproduces the
+   (`xml-grammar.jsonic` is embedded as JSON in TS and Rust; Go reproduces the
    same rule chain in `xml.go`). The rule pruning, token set, and element
    shape must match across runtimes.
 5. The parser deliberately does **not** implement every XML 1.0
@@ -237,9 +266,13 @@ builds them first.
 ## Pruning jsonic's value rules (pure mode)
 
 In the default (non-`embed`) mode the `xml` start rule reaches only the
-XML rules, so jsonic's inherited relaxed-JSON value rules become dead.
-Both runtimes delete them from the grammar so the parser — and the
-generated railroad diagram — carry only the rules XML actually uses:
+XML rules, so jsonic's inherited relaxed-JSON value rules, on an engine
+that has them, become dead. Every runtime deletes them from the grammar
+so the parser — and the generated railroad diagram — carry only the rules
+XML actually uses. On the bare engine (what the docs show, what Rust's
+`make` and the Go C library build) there is nothing to delete and the
+loop is a no-op; on a jsonic engine (what the test suites build) it
+removes jsonic's five, so both end with the same four rules:
 
 ```ts
 // ts/src/xml.ts
@@ -361,17 +394,19 @@ constraints that are opt-in (`strictNamespaces`). Check rule 5 and the
 
 ## Build & test
 
-The TS build runs `embed-grammar.js` **before** `tsc`, so edits to
-`xml-grammar.jsonic` are picked up. TypeScript (from `ts/`):
+The TS build does **not** run `embed-grammar.js`: after an edit to
+`xml-grammar.jsonic`, run `npm run embed`, which re-embeds the grammar as
+JSON, and commit the result; `ts/test/grammar-json.test.ts` fails until
+you do. TypeScript (from `ts/`):
 
 ```bash
-npm install            # auto-installs the @tabnas/parser peer; resolves file: siblings
-npm run build          # node embed-grammar.js && tsc --build src && tsc --build test
+npm install            # auto-installs the @tabnas/parser peer
+npm run embed          # node embed-grammar.js && node embed-translate.js
+npm run build          # node embed-translate.js && tsc --build src && tsc --build test
 npm test               # node --test dist-test/*.test.js (includes debug-model + doc-examples)
 ```
 
-(`npm run embed` runs the embed step alone; `npm run reset` does a clean
-reinstall + build + test.)
+(`npm run reset` does a clean reinstall + build + test.)
 
 Go (from `go/`):
 
@@ -431,8 +466,11 @@ What "correct" means here, in order of authority:
    this file are a claim about this package; changing behaviour means
    re-measuring and updating them in the same commit, not later.
 3. **The embedded grammar matches its source.** If you changed
-   `xml-grammar.jsonic`, let the build re-embed it — never hand-edit between
-   the `BEGIN/END EMBEDDED` markers.
+   `xml-grammar.jsonic`, run `npm run embed` (from `ts/`) to re-embed it —
+   never hand-edit between the `BEGIN/END EMBEDDED` markers — and carry
+   the change into `GRAMMAR_TEXT` in `rs/src/lib.rs`.
+   `ts/test/grammar-json.test.ts` and `rs/tests/xml_test.rs` fail while
+   either copy is stale.
 
 ## Releasing
 

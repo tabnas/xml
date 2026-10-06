@@ -11,14 +11,15 @@ task recipes see the [how-to guide](guide.md).
 go get github.com/tabnas/xml/go@latest
 ```
 
-The engine `github.com/tabnas/parser/go` and the `jsonic` grammar
-(`github.com/tabnas/jsonic/go`) are pulled in as dependencies.
+The engine `github.com/tabnas/parser/go` is pulled in as a dependency.
+Embed mode also needs the `jsonic` grammar (`github.com/tabnas/jsonic/go`):
+see [`embed`](#embed).
 
 ## Public API
 
 ```go
 import (
-	tabnasjsonic "github.com/tabnas/jsonic/go"
+	tabnas "github.com/tabnas/parser/go"
 	tabnasxml "github.com/tabnas/xml/go"
 )
 ```
@@ -33,11 +34,11 @@ import (
 
 ## Parse entry
 
-The plugin has no standalone parse function. Make a `jsonic` instance,
+The plugin has no standalone parse function. Make an engine instance,
 register the plugin with `UseDefaults`, and call `Parse`:
 
 ```go
-j := tabnasjsonic.Make()
+j := tabnas.Make()
 if err := j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults /*, overrides */); err != nil {
 	// plugin init failed
 }
@@ -173,7 +174,10 @@ only: the start rule becomes `xml`, Jsonic's JSON structural tokens and
 value/number/string lexers are disabled, and the JSON value rules are
 removed. When `true`, Jsonic's full grammar stays and an XML literal
 (`<tag>…</tag>` or `<tag/>`) is added as an alternate to the `val` rule,
-so XML elements may appear anywhere a Jsonic value is expected.
+so XML elements may appear anywhere a Jsonic value is expected. This mode
+needs a jsonic instance, `tabnasjsonic.Make()`: the bare engine has no
+`val` rule to extend, so `UseDefaults` returns an error there, with a
+message that starts `xml: embed mode needs a jsonic host`.
 
 ## Accepted syntax
 

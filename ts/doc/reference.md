@@ -8,11 +8,12 @@ the [how-to guide](guide.md).
 ## Install
 
 ```bash
-npm install @tabnas/parser @tabnas/jsonic @tabnas/xml
+npm install @tabnas/parser @tabnas/xml
 ```
 
-`@tabnas/parser` (the engine) and `@tabnas/jsonic` (the base grammar) are
-peer dependencies; the plugin is applied on top of them.
+`@tabnas/parser` (the engine) is the one peer dependency; the plugin is
+applied on top of it. Embed mode also needs `@tabnas/jsonic` (see
+[`embed`](#embed)).
 
 ## Exports
 
@@ -34,15 +35,13 @@ import type { XmlOptions, XmlElement } from '@tabnas/xml'
 ## Parse entry
 
 The plugin has no standalone parse function. Build a parser by applying
-`jsonic` and then `Xml` to a `Tabnas` engine, and call its `parse`
-method:
+`Xml` to a `Tabnas` engine, and call its `parse` method:
 
 ```ts
 import { Tabnas } from '@tabnas/parser'
-import { jsonic } from '@tabnas/jsonic'
 import { Xml } from '@tabnas/xml'
 
-const xml = new Tabnas().use(jsonic).use(Xml /*, options */)
+const xml = new Tabnas().use(Xml /*, options */)
 
 const result = xml.parse(source) // source: string
 ```
@@ -208,7 +207,10 @@ When `true`, Jsonic's full relaxed-JSON grammar stays in place and an XML
 literal (`<tag>…</tag>` or `<tag/>`) is added as an alternate to the
 `val` rule, so an XML element may appear anywhere a Jsonic value is
 expected. Plain Jsonic input parses normally; an XML literal builds an
-`XmlElement` subtree in place.
+`XmlElement` subtree in place. This mode needs jsonic applied first,
+`new Tabnas().use(jsonic).use(Xml, { embed: true })`: the bare engine has
+no `val` rule to extend, so `use` throws there, with a message that
+starts `xml: embed mode needs a jsonic host`.
 
 ## Accepted syntax
 

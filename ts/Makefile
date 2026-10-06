@@ -28,8 +28,8 @@ test-go:
 clean-go:
 	cd ../go && go clean -cache
 
-# Rust (the crate in ../rs; the engine, the jsonic base grammar and the
-# fixture runner are sibling checkouts resolved by path)
+# Rust (the crate in ../rs; the engine, and for the tests the jsonic
+# grammar and the fixture runner, are sibling checkouts resolved by path)
 build-rs:
 	cd ../rs && cargo build --all-targets
 

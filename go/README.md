@@ -1,6 +1,6 @@
 # tabnas/xml (Go)
 
-A [Jsonic](https://github.com/tabnas/jsonic) grammar plugin that parses XML
+A [tabnas](https://github.com/tabnas/parser) grammar plugin that parses XML
 text into a tree of elements, with support for attributes, mixed content,
 namespaces, entities, CDATA sections, comments, processing instructions,
 and DOCTYPE declarations.
@@ -16,11 +16,10 @@ fixtures.
 go get github.com/tabnas/xml/go
 ```
 
-The `jsonic` engine (`github.com/tabnas/jsonic/go`) is pulled in as a
-dependency. While building from a source checkout before the modules are
-published, clone `https://github.com/tabnas/jsonic` as a sibling of this
-repo; the module's `go.mod` resolves `github.com/tabnas/jsonic/go` via a
-`replace` directive to `../../jsonic/go`.
+The engine (`github.com/tabnas/parser/go`) is pulled in as a dependency;
+nothing else is needed. Embed mode, which places XML inside jsonic
+source, also needs the jsonic grammar from `github.com/tabnas/jsonic/go`:
+see the [guide](doc/guide.md).
 
 ## Example
 
@@ -30,12 +29,12 @@ package main
 import (
 	"fmt"
 
-	tabnasjsonic "github.com/tabnas/jsonic/go"
+	tabnas "github.com/tabnas/parser/go"
 	tabnasxml "github.com/tabnas/xml/go"
 )
 
 func main() {
-	j := tabnasjsonic.Make()
+	j := tabnas.Make()
 	if err := j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults); err != nil {
 		panic(err)
 	}

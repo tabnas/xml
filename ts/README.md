@@ -1,6 +1,6 @@
 # @tabnas/xml
 
-A [Jsonic](https://github.com/tabnas/jsonic) grammar plugin that parses XML
+A [tabnas](https://github.com/tabnas/parser) grammar plugin that parses XML
 text into a tree of elements, with support for attributes, mixed content,
 namespaces, entities, CDATA sections, comments, processing instructions,
 and DOCTYPE declarations.
@@ -14,20 +14,20 @@ This is the TypeScript / JavaScript package. A Go port lives in
 ## Install
 
 ```sh
-npm install @tabnas/parser @tabnas/jsonic @tabnas/xml
+npm install @tabnas/parser @tabnas/xml
 ```
 
-`@tabnas/parser` (the engine) and `@tabnas/jsonic` (the base grammar) are
-peer dependencies.
+`@tabnas/parser` (the engine) is a peer dependency, and the only one.
+Embed mode, which places XML inside jsonic source, also needs
+`@tabnas/jsonic` installed (see the [guide](doc/guide.md)).
 
 ## Example
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
-const { jsonic } = require('@tabnas/jsonic')
 const { Xml } = require('@tabnas/xml')
 
-const xml = new Tabnas().use(jsonic).use(Xml)
+const xml = new Tabnas().use(Xml)
 
 xml.parse('<a>Tom &amp; Jerry</a>').children   // => ['Tom & Jerry']
 ```
@@ -58,8 +58,8 @@ live grammar with
 
 A vertical ASCII version is in [`doc/grammar.txt`](doc/grammar.txt). The
 grammar source lives in the repository's top-level `xml-grammar.jsonic`
-and is embedded into [`src/xml.ts`](src/xml.ts) by `embed-grammar.js`
-(run via `npm run build` or `npm run embed`).
+and is embedded into [`src/xml.ts`](src/xml.ts) as JSON by
+`embed-grammar.js` (run via `npm run embed`).
 
 ## License
 

@@ -21,6 +21,29 @@ import { Xml, decodeBOM } from '../dist/xml'
 // ---------------------------------------------------------------------------
 
 describe('xml-embedded-in-jsonic', () => {
+  // Embed mode extends jsonic's `val` rule, so it needs jsonic installed
+  // first. On any other host the plugin refuses to install rather than
+  // build a parser that turns every document into nothing.
+  test('embed mode refuses a host without jsonic', () => {
+    const want = {
+      message: /^xml: embed mode needs a jsonic host: install the xml plugin on a jsonic engine/,
+    }
+    assert.throws(() => new Tabnas().use(Xml, { embed: true }), want)
+    // Installing jsonic AFTER the plugin is the same mistake.
+    assert.throws(() => new Tabnas().use(Xml, { embed: true }).use(jsonic), want)
+    // Pure mode needs no jsonic, and embed: false is pure mode.
+    assert.deepEqual(new Tabnas().use(Xml, { embed: false }).parse('<a/>'), {
+      name: 'a', localName: 'a', attributes: {}, children: [],
+    })
+  })
+
+  test('embed mode on a jsonic host installs and parses', () => {
+    const j = new Tabnas().use(jsonic).use(Xml, { embed: true })
+    assert.deepEqual(j.parse('{x: <b>t</b>}'), {
+      x: { name: 'b', localName: 'b', attributes: {}, children: ['t'] },
+    })
+  })
+
   test('plain Jsonic is unaffected by embed mode', () => {
     const j = new Tabnas().use(jsonic).use(Xml, { embed: true })
     assert.deepEqual(j.parse('{a:1, b:"two"}'), { a: 1, b: 'two' })

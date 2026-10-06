@@ -439,7 +439,8 @@ const (
 	confNotWfRejectFloor    = 438
 )
 
-// confParse uses the documented Go setup from the README.
+// confParse uses the setup every suite here uses, jsonic and then the
+// plugin; the README's engine-only setup gives the same results.
 func confParse(ct confTest) (any, error) {
 	body, err := os.ReadFile(ct.URI)
 	if err != nil {

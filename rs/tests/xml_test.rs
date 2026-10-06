@@ -21,11 +21,24 @@ use tabnas_xml::{decode_bom, make, make_with, parse, plugin, xml, XmlOptions, GR
 
 use common::{json, repo_root, strip_ansi, to_value};
 
+/// Embed mode on a jsonic parser, the `new Tabnas().use(jsonic).use(Xml,
+/// { embed: true })` of the canonical suite. [`make_with`] builds on the
+/// bare engine, which has no jsonic document to embed XML in.
 fn embed() -> Tabnas {
-    make_with(&XmlOptions {
-        embed: true,
-        ..Default::default()
-    })
+    let mut parser = tabnas_jsonic::make();
+    parser
+        .use_plugin(
+            plugin(),
+            Some(
+                XmlOptions {
+                    embed: true,
+                    ..Default::default()
+                }
+                .to_value(),
+            ),
+        )
+        .expect("the plugin installs on a jsonic parser");
+    parser
 }
 
 fn field<'a>(value: &'a Value, key: &str) -> &'a Value {
@@ -168,7 +181,9 @@ fn errors_carry_the_code_the_position_and_the_rendered_message() {
         "{report}"
     );
     assert!(report.contains("Expected </b> but found </c>."), "{report}");
-    assert!(report.contains("[jsonic/xml_mismatched_tag]"), "{report}");
+    // `parse` builds on the engine, which tags its reports `tabnas`; a
+    // parser built on jsonic tags the same report `jsonic`.
+    assert!(report.contains("[tabnas/xml_mismatched_tag]"), "{report}");
 }
 
 /// Namespace resolution runs at DOCUMENT CLOSE, after the last token has
@@ -234,7 +249,7 @@ fn a_namespace_failure_renders_its_template_at_the_start_of_the_source() {
 
         let report = strip_ansi(&error.to_string());
         let first = report.lines().next().unwrap_or_default();
-        assert_eq!(first, format!("[jsonic/{code}]: {message}"), "{report}");
+        assert_eq!(first, format!("[tabnas/{code}]: {message}"), "{report}");
         assert!(report.contains(hint), "{report}");
         // The caret line repeats the message, so the stand-in must be
         // absent from the whole report, not merely from its first line.
@@ -250,6 +265,54 @@ fn a_namespace_failure_renders_its_template_at_the_start_of_the_source() {
 // document is parsed by jsonic; the XML subtree is built by the plugin's
 // element grammar.
 // ---------------------------------------------------------------------------
+
+#[test]
+fn embed_mode_refuses_a_host_without_jsonic() {
+    // Embed mode splices XML into jsonic's `val` rule, so on the bare
+    // engine the plugin refuses to install, rather than build a parser
+    // that turns every document into nothing. The TypeScript and Go
+    // plugins refuse with the same words.
+    const WANT: &str =
+        "xml: embed mode needs a jsonic host: install the xml plugin on a jsonic engine";
+    let options = XmlOptions {
+        embed: true,
+        ..Default::default()
+    };
+
+    let mut bare = Tabnas::new();
+    let error = xml(&mut bare, &options).expect_err("embed on the bare engine is refused");
+    assert!(error.0.starts_with(WANT), "{error}");
+    assert!(
+        !bare.rule_names().iter().any(|name| name == "xml"),
+        "nothing is installed when embed mode is refused"
+    );
+
+    let mut used = Tabnas::new();
+    let error = used
+        .use_plugin(plugin(), Some(options.to_value()))
+        .err()
+        .expect("embed through use_plugin is refused too");
+    assert!(error.0.starts_with(WANT), "{error}");
+
+    // Pure mode needs no jsonic, and embed: false is pure mode.
+    let mut pure = Tabnas::new();
+    xml(&mut pure, &XmlOptions::default()).expect("pure mode installs on the engine");
+    assert_eq!(
+        json(&pure.parse("<a/>").expect("parses")),
+        r#"{"name":"a","localName":"a","attributes":{},"children":[]}"#
+    );
+}
+
+#[test]
+#[should_panic(expected = "xml: embed mode needs a jsonic host")]
+fn make_with_panics_in_embed_mode() {
+    // `make_with` builds on the bare engine and returns a parser, not a
+    // Result, so it panics rather than hand back one that cannot parse.
+    let _ = make_with(&XmlOptions {
+        embed: true,
+        ..Default::default()
+    });
+}
 
 #[test]
 fn plain_jsonic_is_unaffected_by_embed_mode() {
@@ -794,10 +857,11 @@ fn ported_patterns_use_the_javascript_character_classes() {
 
 #[test]
 fn the_embedded_grammar_matches_xml_grammar_jsonic() {
-    // xml-grammar.jsonic is authored in jsonic and parsed at load time by
-    // the TypeScript plugin; this crate embeds the parsed form. The two
-    // are held to the same value here, through the jsonic port, so an
-    // edit to the file that is not carried into `GRAMMAR_TEXT` fails.
+    // xml-grammar.jsonic is authored in jsonic and shipped as JSON: the
+    // TypeScript plugin embeds what ts/embed-grammar.js writes, and this
+    // crate embeds the same JSON by hand. The two are held to the same
+    // value here, through the jsonic port (a dev-dependency), so an edit
+    // to the file that is not carried into `GRAMMAR_TEXT` fails.
     let path = repo_root().join("xml-grammar.jsonic");
     let source =
         fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
@@ -855,12 +919,21 @@ fn reusing_one_parser_is_far_faster_than_rebuilding_it_per_parse() {
     // Guards against a regression where callers rebuild the (expensive)
     // XML parser and grammar on every parse instead of building one
     // instance and reusing it. Building the grammar dominates a parse, so
-    // the rebuild-per-call path is many times slower. The check is
+    // the rebuild-per-call path is many times slower, and a change that
+    // made reuse rebuild would bring the ratio to about 1x. The check is
     // machine-independent: both sides run on the same machine in the same
-    // process, with no wall-clock budget. Mirrors go/perf_test.go and
-    // ts/test/perf.test.ts.
+    // process, with no wall-clock budget. A shared runner can stall any
+    // one round, so each timing keeps the fastest of three. Mirrors
+    // go/perf_test.go and ts/test/perf.test.ts.
+    //
+    // The floor is 2x, as chess's perf guard has had since tabnas/chess#49.
+    // It was 4x while `make` built on jsonic, whose grammar cost about five
+    // times what the XML plugin alone does; on the bare engine the ratio
+    // is about 10x locally and measured 3.8x on a shared runner, and 2x
+    // still fails the regression above by a wide margin.
     const SRC: &str = r#"<a x="1"><b>hello</b><c/></a>"#;
     const N: usize = 300;
+    const ROUNDS: usize = 3;
 
     let reused = make();
     for _ in 0..20 {
@@ -868,23 +941,27 @@ fn reusing_one_parser_is_far_faster_than_rebuilding_it_per_parse() {
         make().parse(SRC).expect("warm rebuild");
     }
 
-    let started = Instant::now();
-    for _ in 0..N {
-        reused.parse(SRC).expect("reuse parse");
-    }
-    let reuse = started.elapsed();
+    let mut reuse = std::time::Duration::MAX;
+    let mut rebuild = std::time::Duration::MAX;
+    for _ in 0..ROUNDS {
+        let started = Instant::now();
+        for _ in 0..N {
+            reused.parse(SRC).expect("reuse parse");
+        }
+        reuse = reuse.min(started.elapsed());
 
-    let started = Instant::now();
-    for _ in 0..N {
-        make().parse(SRC).expect("rebuild parse");
+        let started = Instant::now();
+        for _ in 0..N {
+            make().parse(SRC).expect("rebuild parse");
+        }
+        rebuild = rebuild.min(started.elapsed());
     }
-    let rebuild = started.elapsed();
 
     assert!(
-        reuse * 4 < rebuild,
+        reuse * 2 < rebuild,
         "instance reuse is not meaningfully faster than rebuilding the parser per parse: \
          {N} reuse parses took {reuse:?} vs {rebuild:?} rebuilding per call \
-         (ratio {:.1}x, need >=4x). Build one parser (tabnas_xml::make()) and reuse it.",
+         (ratio {:.1}x, need >2x). Build one parser (tabnas_xml::make()) and reuse it.",
         rebuild.as_secs_f64() / reuse.as_secs_f64()
     );
 }

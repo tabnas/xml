@@ -9,7 +9,6 @@ Every recipe starts from a parser built like this:
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
-const { jsonic } = require('@tabnas/jsonic')
 const { Xml } = require('@tabnas/xml')
 ```
 
@@ -20,10 +19,9 @@ tree of objects:
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
-const { jsonic } = require('@tabnas/jsonic')
 const { Xml } = require('@tabnas/xml')
 
-const xml = new Tabnas().use(jsonic).use(Xml)
+const xml = new Tabnas().use(Xml)
 
 xml.parse('<doc><child1/><child2><nested>text</nested></child2></doc>')
 // => {
@@ -47,10 +45,9 @@ Attributes arrive as a string-to-string map on each element. Quotes
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
-const { jsonic } = require('@tabnas/jsonic')
 const { Xml } = require('@tabnas/xml')
 
-const xml = new Tabnas().use(jsonic).use(Xml)
+const xml = new Tabnas().use(Xml)
 
 xml.parse('<doc attr1="value1" attr2="value2"/>').attributes
 // => { attr1: 'value1', attr2: 'value2' }
@@ -64,10 +61,9 @@ wherever the named reference appears:
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
-const { jsonic } = require('@tabnas/jsonic')
 const { Xml } = require('@tabnas/xml')
 
-const xml = new Tabnas().use(jsonic).use(Xml, {
+const xml = new Tabnas().use(Xml, {
   customEntities: { nbsp: ' ', copy: '©' },
 })
 
@@ -86,10 +82,9 @@ sequences should pass through untouched, set `strictEntities: false`:
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
-const { jsonic } = require('@tabnas/jsonic')
 const { Xml } = require('@tabnas/xml')
 
-const xml = new Tabnas().use(jsonic).use(Xml, { strictEntities: false })
+const xml = new Tabnas().use(Xml, { strictEntities: false })
 
 xml.parse('<a>&unknown;</a>').children
 // => ['&unknown;']
@@ -105,10 +100,9 @@ decoding at all), set `entities: false`:
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
-const { jsonic } = require('@tabnas/jsonic')
 const { Xml } = require('@tabnas/xml')
 
-const xml = new Tabnas().use(jsonic).use(Xml, { entities: false })
+const xml = new Tabnas().use(Xml, { entities: false })
 
 xml.parse('<a>&amp;</a>').children
 // => ['&amp;']
@@ -122,10 +116,9 @@ plain attributes and never adding `namespace`), set `namespaces: false`:
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
-const { jsonic } = require('@tabnas/jsonic')
 const { Xml } = require('@tabnas/xml')
 
-const xml = new Tabnas().use(jsonic).use(Xml, { namespaces: false })
+const xml = new Tabnas().use(Xml, { namespaces: false })
 
 xml.parse('<a xmlns="http://example.com"/>')
 // => {
@@ -144,10 +137,9 @@ that omit the attribute:
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
-const { jsonic } = require('@tabnas/jsonic')
 const { Xml } = require('@tabnas/xml')
 
-const xml = new Tabnas().use(jsonic).use(Xml)
+const xml = new Tabnas().use(Xml)
 
 xml.parse('<!DOCTYPE doc [<!ENTITY x "world">]><doc>hello &x;!</doc>').children
 // => ['hello world!']
@@ -167,10 +159,9 @@ and `lang`:
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
-const { jsonic } = require('@tabnas/jsonic')
 const { Xml } = require('@tabnas/xml')
 
-const xml = new Tabnas().use(jsonic).use(Xml)
+const xml = new Tabnas().use(Xml)
 
 const r = xml.parse('<a xml:lang="fr"><b>bonjour</b></a>')
 r.lang             // => 'fr'
@@ -181,7 +172,9 @@ r.children[0].lang // => 'fr'
 
 With `embed: true` the plugin keeps Jsonic's relaxed-JSON grammar and
 adds XML literals as values: an `<tag>…</tag>` (or `<tag/>`) may appear
-anywhere Jsonic expects a value. Plain Jsonic input is unaffected:
+anywhere Jsonic expects a value. The grammar comes from `@tabnas/jsonic`,
+so install it and apply it before the plugin. Plain Jsonic input is
+unaffected:
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
@@ -216,10 +209,9 @@ and returns a decoded JS string ready to parse; pass it a Node `Buffer`
 ```js
 const { readFileSync } = require('node:fs')
 const { Tabnas } = require('@tabnas/parser')
-const { jsonic } = require('@tabnas/jsonic')
 const { Xml, decodeBOM } = require('@tabnas/xml')
 
-const xml = new Tabnas().use(jsonic).use(Xml)
+const xml = new Tabnas().use(Xml)
 const body = decodeBOM(readFileSync('doc.xml')) // Buffer in, string out
 const doc = xml.parse(body)
 ```
@@ -234,10 +226,9 @@ which names the specific error code:
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
-const { jsonic } = require('@tabnas/jsonic')
 const { Xml } = require('@tabnas/xml')
 
-const xml = new Tabnas().use(jsonic).use(Xml)
+const xml = new Tabnas().use(Xml)
 
 let code = ''
 try {

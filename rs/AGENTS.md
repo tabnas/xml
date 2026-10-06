@@ -26,27 +26,42 @@ file covers only what is specific to this crate.
 
 ## Three crates by path
 
-`Cargo.toml` takes `tabnas` (`../../parser/rs`), `tabnas-jsonic`
-(`../../jsonic/rs`, which brings `tabnas-json`) and, as a
-dev-dependency, `tabnas-support` (`../../support/rs`, feature
-`serde_json`). None is published. Clone them as siblings before running
-cargo, and expect `Cargo.lock` to move when one bumps its version:
-`../ci/rust/run.sh` exempts exactly those entries when it diffs the
-lock, and asserts everything else.
+`Cargo.toml` takes `tabnas` (`../../parser/rs`), the one runtime
+dependency, and, as dev-dependencies, `tabnas-support`
+(`../../support/rs`, feature `serde_json`) and `tabnas-jsonic`
+(`../../jsonic/rs`, which brings `tabnas-json`). `make`, `make_with` and
+`parse` build on the bare engine, `Tabnas::new()`, on the maintainer's
+ruling of 2026-10-06; jsonic is for the tests alone (the grammar-file
+check, the fixture runner, embed mode). Clone them as siblings before
+running cargo, and expect `Cargo.lock` to move when one bumps its
+version: `../ci/rust/run.sh` exempts exactly those entries when it diffs
+the lock, and asserts everything else.
+
+Embed mode needs a jsonic parser to embed XML in. On any parser without
+jsonic's `val` rule, the bare engine included, `xml()` (and so
+`use_plugin`) returns an error starting `xml: embed mode needs a jsonic
+host` and installs nothing, as the TypeScript and Go plugins do, on the
+maintainer's ruling of 2026-10-06 ("fail fast, all ports"). `make_with`,
+which builds on the engine and returns a `Tabnas`, panics with that
+message for `embed: true`: its signature has no other way to refuse, and
+a parser that turns every document into nothing would be the silent
+alternative. A caller who wants embed mode installs `plugin()` on
+`tabnas_jsonic::make()`, which is what the `embed()` helper in
+`tests/xml_test.rs` does; `embed_mode_refuses_a_host_without_jsonic` and
+`make_with_panics_in_embed_mode` pin the refusals.
 
 ## The grammar is embedded, and a test holds it to the file
 
 `GRAMMAR_TEXT` in `src/lib.rs`, between the `BEGIN`/`END EMBEDDED`
-markers, is `../xml-grammar.jsonic` as JSON. Unlike chess and css,
-`ts/embed-grammar.js` here has ONE target: it writes the raw jsonic TEXT
-into `ts/src/xml.ts`, which parses it at load time. There is no Go
-target and no JSON conversion in that script, so extending it to write
-Rust would not be the mechanical change the porting playbook permits.
-The embedded JSON is maintained by hand, and
+markers, is `../xml-grammar.jsonic` as JSON. `ts/embed-grammar.js` has
+ONE target: it writes the same JSON (`JSON.stringify`, two-space indent)
+into `ts/src/xml.ts`, which reads it with `JSON.parse` at load time, and
+today the two copies are byte for byte the same. The script does not
+write this one. The embedded JSON is maintained by hand, and
 `the_embedded_grammar_matches_xml_grammar_jsonic` parses the file with
 `tabnas_jsonic` and compares, so an edit to the grammar that is not
-carried across fails the suite. Edit the `.jsonic` file first, then the
-constant.
+carried across fails the suite. Edit the `.jsonic` file first, run
+`npm run embed` in `../ts`, then carry the result into the constant.
 
 ## Every `@ref` is a typed registration
 
