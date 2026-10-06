@@ -871,12 +871,21 @@ fn reusing_one_parser_is_far_faster_than_rebuilding_it_per_parse() {
     // Guards against a regression where callers rebuild the (expensive)
     // XML parser and grammar on every parse instead of building one
     // instance and reusing it. Building the grammar dominates a parse, so
-    // the rebuild-per-call path is many times slower. The check is
+    // the rebuild-per-call path is many times slower, and a change that
+    // made reuse rebuild would bring the ratio to about 1x. The check is
     // machine-independent: both sides run on the same machine in the same
-    // process, with no wall-clock budget. Mirrors go/perf_test.go and
-    // ts/test/perf.test.ts.
+    // process, with no wall-clock budget. A shared runner can stall any
+    // one round, so each timing keeps the fastest of three. Mirrors
+    // go/perf_test.go and ts/test/perf.test.ts.
+    //
+    // The floor is 2x, as chess's perf guard has had since tabnas/chess#49.
+    // It was 4x while `make` built on jsonic, whose grammar cost about five
+    // times what the XML plugin alone does; on the bare engine the ratio
+    // is about 10x locally and measured 3.8x on a shared runner, and 2x
+    // still fails the regression above by a wide margin.
     const SRC: &str = r#"<a x="1"><b>hello</b><c/></a>"#;
     const N: usize = 300;
+    const ROUNDS: usize = 3;
 
     let reused = make();
     for _ in 0..20 {
@@ -884,23 +893,27 @@ fn reusing_one_parser_is_far_faster_than_rebuilding_it_per_parse() {
         make().parse(SRC).expect("warm rebuild");
     }
 
-    let started = Instant::now();
-    for _ in 0..N {
-        reused.parse(SRC).expect("reuse parse");
-    }
-    let reuse = started.elapsed();
+    let mut reuse = std::time::Duration::MAX;
+    let mut rebuild = std::time::Duration::MAX;
+    for _ in 0..ROUNDS {
+        let started = Instant::now();
+        for _ in 0..N {
+            reused.parse(SRC).expect("reuse parse");
+        }
+        reuse = reuse.min(started.elapsed());
 
-    let started = Instant::now();
-    for _ in 0..N {
-        make().parse(SRC).expect("rebuild parse");
+        let started = Instant::now();
+        for _ in 0..N {
+            make().parse(SRC).expect("rebuild parse");
+        }
+        rebuild = rebuild.min(started.elapsed());
     }
-    let rebuild = started.elapsed();
 
     assert!(
-        reuse * 4 < rebuild,
+        reuse * 2 < rebuild,
         "instance reuse is not meaningfully faster than rebuilding the parser per parse: \
          {N} reuse parses took {reuse:?} vs {rebuild:?} rebuilding per call \
-         (ratio {:.1}x, need >=4x). Build one parser (tabnas_xml::make()) and reuse it.",
+         (ratio {:.1}x, need >2x). Build one parser (tabnas_xml::make()) and reuse it.",
         rebuild.as_secs_f64() / reuse.as_secs_f64()
     );
 }
