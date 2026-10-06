@@ -44,7 +44,7 @@ The **parser** then consumes those tokens with four rules (`xml`,
 alternates with at most two tokens of lookahead. The grammar is small
 enough to read in one screen; it lives in the repository's top-level
 `xml-grammar.jsonic` (authored once, in relaxed-JSON) and is mirrored
-here as a `tabnasjsonic.GrammarSpec`. The `@`-prefixed function references in
+here as a `tabnas.GrammarSpec`. The `@`-prefixed function references in
 the grammar are resolved at plugin time against Go callbacks that build
 the result tree and enforce the structural constraints (single root,
 matching close tags).
@@ -106,7 +106,7 @@ suites). The differences are host-language shape, not parse semantics.
 | ----------------- | ------------------------------------------- | ---------------------------------------------------------- |
 | Build a parser    | `new Tabnas().use(jsonic).use(Xml, opts?)`  | `j := tabnasjsonic.Make(); j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults, opts...)` |
 | Parse entry       | `instance.parse(src)` (returns the result)  | `j.Parse(src)` (returns `(any, error)`)                    |
-| Plugin signature  | `(tn, options) => void`                     | `func(*tabnasjsonic.Jsonic, map[string]any) error`               |
+| Plugin signature  | `(tn, options) => void`                     | `func(*tabnas.Tabnas, map[string]any) error`                     |
 | Options type      | `XmlOptions` object                         | `map[string]any` (keys match `tabnasxml.Defaults`)               |
 | `customEntities`  | `Record<string, string>`                    | `map[string]string`                                        |
 | BOM helper        | `decodeBOM(Buffer \| string)`               | `tabnasxml.DecodeBOM(string)`                                    |
