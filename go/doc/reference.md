@@ -11,8 +11,8 @@ task recipes see the [how-to guide](guide.md).
 go get github.com/tabnas/xml/go@latest
 ```
 
-The `jsonic` engine (`github.com/tabnas/jsonic/go`) is pulled in as a
-dependency.
+The engine `github.com/tabnas/parser/go` and the `jsonic` grammar
+(`github.com/tabnas/jsonic/go`) are pulled in as dependencies.
 
 ## Public API
 
@@ -25,7 +25,7 @@ import (
 
 | Symbol                | Kind                                              | Purpose                                          |
 | --------------------- | ------------------------------------------------- | ------------------------------------------------ |
-| `tabnasxml.Xml`             | `func(*tabnasjsonic.Jsonic, map[string]any) error`      | The plugin. Register with `UseDefaults`.         |
+| `tabnasxml.Xml`             | `func(*tabnas.Tabnas, map[string]any) error`            | The plugin. Register with `UseDefaults`.         |
 | `tabnasxml.Defaults`        | `map[string]any`                                  | Default option values to pass to `UseDefaults`.  |
 | `tabnasxml.DecodeBOM`       | `func(string) string`                             | Strip/transcode a byte-order mark before parse.  |
 | `tabnasxml.EntityDecoder`   | `func(string, map[string]string) string`          | The entity-decoder function type (advanced).     |

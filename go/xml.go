@@ -23,7 +23,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
-	jsonic "github.com/tabnas/jsonic/go"
+	tabnas "github.com/tabnas/parser/go"
 )
 
 // VERSION is this module's version. It MUST equal ts/package.json
@@ -87,7 +87,7 @@ var xmlElementFields = []any{
 //	j := jsonic.Make()
 //	j.UseDefaults(xml.Xml, xml.Defaults)
 //	result, err := j.Parse(src)
-func Xml(j *jsonic.Jsonic, options map[string]any) error {
+func Xml(j *tabnas.Tabnas, options map[string]any) error {
 	// Guard against re-invocation: Use() re-runs plugins on SetOptions calls.
 	if j.Decoration("xml-init") != nil {
 		return nil
@@ -129,14 +129,14 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 
 	// Shared options installed in both modes: the custom matcher, the
 	// text-end character `<`, and the XML-specific error templates.
-	j.SetOptions(jsonic.Options{
-		Parse: &jsonic.ParseOptions{Prepare: map[string]func(*jsonic.Context){
-			"xml-fields": func(ctx *jsonic.Context) {
+	j.SetOptions(tabnas.Options{
+		Parse: &tabnas.ParseOptions{Prepare: map[string]func(*tabnas.Context){
+			"xml-fields": func(ctx *tabnas.Context) {
 				ctx.Meta["fields"] = xmlElementFields
 			},
 		}},
-		Lex: &jsonic.LexOptions{
-			Match: map[string]*jsonic.MatchSpec{
+		Lex: &tabnas.LexOptions{
+			Match: map[string]*tabnas.MatchSpec{
 				"xmltag": {Order: 100_000, Make: buildXmlTagMatcher(decode, declared, entitiesOn, strictEntities, embed, xigTin, xopTin, xclTin, xscTin)},
 			},
 		},
@@ -202,21 +202,21 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 		// well-formedness checks); Jsonic's text matcher only sees
 		// whitespace before and after the root element where no
 		// decoding is needed.
-		j.SetOptions(jsonic.Options{
-			Rule: &jsonic.RuleOptions{
+		j.SetOptions(tabnas.Options{
+			Rule: &tabnas.RuleOptions{
 				Start:   "xml",
 				Exclude: "jsonic,imp",
 			},
-			Fixed: &jsonic.FixedOptions{Token: map[string]*string{
+			Fixed: &tabnas.FixedOptions{Token: map[string]*string{
 				"#OB": nil, "#CB": nil, "#OS": nil, "#CS": nil,
 				"#CL": nil, "#CA": nil,
 			}},
-			Number:  &jsonic.NumberOptions{Lex: boolPtr(false)},
-			Value:   &jsonic.ValueOptions{Lex: boolPtr(false)},
-			String:  &jsonic.StringOptions{Lex: boolPtr(false)},
-			Comment: &jsonic.CommentOptions{Lex: boolPtr(false)},
-			Space:   &jsonic.SpaceOptions{Lex: boolPtr(false)},
-			Line:    &jsonic.LineOptions{Lex: boolPtr(false)},
+			Number:  &tabnas.NumberOptions{Lex: boolPtr(false)},
+			Value:   &tabnas.ValueOptions{Lex: boolPtr(false)},
+			String:  &tabnas.StringOptions{Lex: boolPtr(false)},
+			Comment: &tabnas.CommentOptions{Lex: boolPtr(false)},
+			Space:   &tabnas.SpaceOptions{Lex: boolPtr(false)},
+			Line:    &tabnas.LineOptions{Lex: boolPtr(false)},
 			// XML 1.0 §2.1: a well-formed document has exactly ONE document
 			// element. Input that parses to no value at all — a prolog on its
 			// own, a lone comment, whitespace — satisfies every other rule and
@@ -225,11 +225,11 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 			// error it is. Both nil and the engine's Undefined sentinel are
 			// listed: which one a no-value parse lands on depends on whether
 			// the start rule ran at all. Mirrors ts/src/xml.ts.
-			Result: &jsonic.ResultOptions{Fail: []any{nil, jsonic.Undefined}},
+			Result: &tabnas.ResultOptions{Fail: []any{nil, tabnas.Undefined}},
 			// ...and the same rule makes empty input ill-formed. The engine
 			// short-circuits "" before the rule loop, so Result.Fail never
 			// sees it; Lex.Empty governs that path.
-			Lex: &jsonic.LexOptions{Empty: boolPtr(false)},
+			Lex: &tabnas.LexOptions{Empty: boolPtr(false)},
 		})
 	}
 
@@ -238,14 +238,14 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 	// embed mode this preserves all default ignored tokens; in pure
 	// mode the SP/LN/CM tokens are never produced (we disabled their
 	// lexers), but keeping them here is harmless.
-	j.SetTokenSet("IGNORE", []jsonic.Tin{
+	j.SetTokenSet("IGNORE", []tabnas.Tin{
 		j.Token("#SP", ""), j.Token("#LN", ""), j.Token("#CM", ""), xigTin,
 	})
 
 	// Grammar declarations. Mirror the TypeScript grammar exactly.
-	refs := map[jsonic.FuncRef]any{
-		"@xml-bc": jsonic.StateAction(func(r *jsonic.Rule, ctx *jsonic.Context) {
-			if r.Child == nil || r.Child == jsonic.NoRule || r.Child.Node == nil {
+	refs := map[tabnas.FuncRef]any{
+		"@xml-bc": tabnas.StateAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
+			if r.Child == nil || r.Child == tabnas.NoRule || r.Child.Node == nil {
 				return
 			}
 			// The Go parser follows the Next chain forward from the root
@@ -262,8 +262,8 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 			if namespacesOn {
 				if el, ok := r.Node.(map[string]any); ok {
 					if code := resolveNamespaces(el, nil, strictNamespaces); code != "" {
-						ctx.ParseErr = &jsonic.Token{
-							Name: "#BD", Tin: jsonic.TinBD,
+						ctx.ParseErr = &tabnas.Token{
+							Name: "#BD", Tin: tabnas.TinBD,
 							Err: code, Why: code, Src: code,
 						}
 					}
@@ -271,7 +271,7 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 			}
 		}),
 
-		"@no-root-yet": jsonic.AltCond(func(_ *jsonic.Rule, ctx *jsonic.Context) bool {
+		"@no-root-yet": tabnas.AltCond(func(_ *tabnas.Rule, ctx *tabnas.Context) bool {
 			seen, _ := ctx.U["rootSeen"].(bool)
 			return !seen
 		}),
@@ -281,15 +281,15 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 		// appear, so character data before or after the root is not
 		// well-formed. Comments/PIs/DOCTYPE arrive as #XIG and are
 		// ignored by the token set, so only #TX needs policing.
-		"@doc-text-open": jsonic.AltAction(func(r *jsonic.Rule, ctx *jsonic.Context) {
+		"@doc-text-open": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
 			checkDocText(r.O0, ctx)
 		}),
 
-		"@doc-text-close": jsonic.AltAction(func(r *jsonic.Rule, ctx *jsonic.Context) {
+		"@doc-text-close": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
 			checkDocText(r.C0, ctx)
 		}),
 
-		"@element-open": jsonic.AltAction(func(r *jsonic.Rule, ctx *jsonic.Context) {
+		"@element-open": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
 			v := r.O0.Val.(map[string]any)
 			name := v["name"].(string)
 			attrs := v["attributes"].(map[string]any)
@@ -301,7 +301,7 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 			}
 		}),
 
-		"@element-selfclose": jsonic.AltAction(func(r *jsonic.Rule, ctx *jsonic.Context) {
+		"@element-selfclose": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
 			v := r.O0.Val.(map[string]any)
 			name := v["name"].(string)
 			attrs := v["attributes"].(map[string]any)
@@ -313,7 +313,7 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 			}
 		}),
 
-		"@element-close": jsonic.AltAction(func(r *jsonic.Rule, ctx *jsonic.Context) {
+		"@element-close": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
 			el, _ := r.Node.(map[string]any)
 			openName, _ := el["name"].(string)
 			closeName, _ := r.C0.Val.(string)
@@ -333,18 +333,18 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 			}
 		}),
 
-		"@child-text": jsonic.AltAction(func(r *jsonic.Rule, ctx *jsonic.Context) {
+		"@child-text": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
 			el, _ := r.Node.(map[string]any)
 			children, _ := el["children"].([]any)
 			el["children"] = append(children, r.O0.Val)
 			r.EnsureU()["done"] = true
 		}),
 
-		"@child-bc": jsonic.StateAction(func(r *jsonic.Rule, ctx *jsonic.Context) {
+		"@child-bc": tabnas.StateAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
 			if done, _ := r.U["done"].(bool); done {
 				return
 			}
-			if r.Child == nil || r.Child == jsonic.NoRule || r.Child.Node == nil {
+			if r.Child == nil || r.Child == tabnas.NoRule || r.Child.Node == nil {
 				return
 			}
 			el, ok := r.Node.(map[string]any)
@@ -355,48 +355,48 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 			el["children"] = append(children, r.Child.Node)
 		}),
 
-		"@element-is-selfclosed": jsonic.AltCond(func(r *jsonic.Rule, ctx *jsonic.Context) bool {
+		"@element-is-selfclosed": tabnas.AltCond(func(r *tabnas.Rule, ctx *tabnas.Context) bool {
 			v, _ := r.U["selfclose"].(int)
 			return v == 1
 		}),
 	}
 
-	gs := &jsonic.GrammarSpec{
+	gs := &tabnas.GrammarSpec{
 		Ref: refs,
-		Rule: map[string]*jsonic.GrammarRuleSpec{
+		Rule: map[string]*tabnas.GrammarRuleSpec{
 			"xml": {
-				Open: []*jsonic.GrammarAltSpec{
+				Open: []*tabnas.GrammarAltSpec{
 					{S: "#ZZ"},
 					{S: "#TX", R: "xml", A: "@doc-text-open"},
 					{P: "element", C: "@no-root-yet"},
 				},
-				Close: []*jsonic.GrammarAltSpec{
+				Close: []*tabnas.GrammarAltSpec{
 					{S: "#ZZ", G: "end"},
 					{S: "#TX", R: "xml", A: "@doc-text-close", G: "comma"},
 				},
 			},
 			"element": {
-				Open: []*jsonic.GrammarAltSpec{
+				Open: []*tabnas.GrammarAltSpec{
 					{S: "#XSC", A: "@element-selfclose", U: map[string]any{"selfclose": 1}},
 					{S: "#XOP", P: "content", A: "@element-open"},
 				},
-				Close: []*jsonic.GrammarAltSpec{
+				Close: []*tabnas.GrammarAltSpec{
 					{C: "@element-is-selfclosed"},
 					{S: "#XCL", A: "@element-close", G: "close"},
 				},
 			},
 			"content": {
-				Open: []*jsonic.GrammarAltSpec{
+				Open: []*tabnas.GrammarAltSpec{
 					{S: "#XCL", B: 1},
 					{P: "child"},
 				},
-				Close: []*jsonic.GrammarAltSpec{
+				Close: []*tabnas.GrammarAltSpec{
 					{S: "#XCL", B: 1, G: "close"},
 					{R: "content"},
 				},
 			},
 			"child": {
-				Open: []*jsonic.GrammarAltSpec{
+				Open: []*tabnas.GrammarAltSpec{
 					{S: "#TX", A: "@child-text"},
 					{S: "#XOP", B: 1, P: "element"},
 					{S: "#XSC", B: 1, P: "element"},
@@ -413,14 +413,14 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 		// parser is looking for a value and sees `#XOP` or `#XSC`,
 		// push the `element` rule (backtracking by 1 so element.open
 		// can read the same token and dispatch).
-		j.Rule("val", func(rs *jsonic.RuleSpec, _ *jsonic.Parser) {
+		j.Rule("val", func(rs *tabnas.RuleSpec, _ *tabnas.Parser) {
 			rs.AddOpen(
-				&jsonic.AltSpec{
-					S: [][]jsonic.Tin{{xopTin}},
+				&tabnas.AltSpec{
+					S: [][]tabnas.Tin{{xopTin}},
 					B: 1, P: "element", G: "xml",
 				},
-				&jsonic.AltSpec{
-					S: [][]jsonic.Tin{{xscTin}},
+				&tabnas.AltSpec{
+					S: [][]tabnas.Tin{{xscTin}},
 					B: 1, P: "element", G: "xml",
 				},
 			)
@@ -431,9 +431,9 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 		// ctx.root().node is not invoked. Resolve namespaces instead
 		// when the element rule closes directly under a val rule.
 		if namespacesOn {
-			j.Rule("element", func(rs *jsonic.RuleSpec, _ *jsonic.Parser) {
-				rs.AddBC(func(r *jsonic.Rule, ctx *jsonic.Context) {
-					if r.Parent != nil && r.Parent != jsonic.NoRule &&
+			j.Rule("element", func(rs *tabnas.RuleSpec, _ *tabnas.Parser) {
+				rs.AddBC(func(r *tabnas.Rule, ctx *tabnas.Context) {
+					if r.Parent != nil && r.Parent != tabnas.NoRule &&
 						r.Parent.Name == "val" {
 						if el, ok := r.Node.(map[string]any); ok {
 							resolveNamespaces(el, nil, strictNamespaces)
@@ -458,7 +458,7 @@ func Xml(j *jsonic.Jsonic, options map[string]any) error {
 // dtdEntities reads the per-parse DOCTYPE-declared entity map (set
 // by the DOCTYPE matcher path). Returns nil if none have been
 // registered yet.
-func dtdEntities(lex *jsonic.Lex) map[string]string {
+func dtdEntities(lex *tabnas.Lex) map[string]string {
 	if lex == nil || lex.Ctx == nil || lex.Ctx.U == nil {
 		return nil
 	}
@@ -469,7 +469,7 @@ func dtdEntities(lex *jsonic.Lex) map[string]string {
 // dtdAttrDefaults reads the per-parse DOCTYPE-supplied attribute
 // default map keyed by element name (set by the DOCTYPE matcher
 // path). Returns nil if none have been registered yet.
-func dtdAttrDefaults(ctx *jsonic.Context) map[string]map[string]string {
+func dtdAttrDefaults(ctx *tabnas.Context) map[string]map[string]string {
 	if ctx == nil || ctx.U == nil {
 		return nil
 	}
@@ -482,7 +482,7 @@ func dtdAttrDefaults(ctx *jsonic.Context) map[string]map[string]string {
 // prolog's root element, and after it) only Misc — comments, PIs, and
 // white space — is allowed. Anything else is character data outside the
 // root element and is not well-formed.
-func checkDocText(tkn *jsonic.Token, ctx *jsonic.Context) {
+func checkDocText(tkn *tabnas.Token, ctx *tabnas.Context) {
 	if tkn == nil || ctx == nil {
 		return
 	}
@@ -494,8 +494,8 @@ func checkDocText(tkn *jsonic.Token, ctx *jsonic.Context) {
 		return
 	}
 	const code = "text_at_top_level"
-	ctx.ParseErr = &jsonic.Token{
-		Name: "#BD", Tin: jsonic.TinBD,
+	ctx.ParseErr = &tabnas.Token{
+		Name: "#BD", Tin: tabnas.TinBD,
 		Err: code, Why: code, Src: code,
 	}
 }
@@ -504,7 +504,7 @@ func checkDocText(tkn *jsonic.Token, ctx *jsonic.Context) {
 // values for any attribute missing from the parsed element instance.
 // Returns the original map if no defaults apply.
 func applyAttrDefaults(
-	attrs map[string]any, elemName string, ctx *jsonic.Context,
+	attrs map[string]any, elemName string, ctx *tabnas.Context,
 ) map[string]any {
 	all := dtdAttrDefaults(ctx)
 	if all == nil {
@@ -770,7 +770,7 @@ type entityDeclState struct {
 }
 
 // entDeclState reads the entity-declaration state off the lex context.
-func entDeclState(lex *jsonic.Lex) entityDeclState {
+func entDeclState(lex *tabnas.Lex) entityDeclState {
 	if lex == nil || lex.Ctx == nil || lex.Ctx.U == nil {
 		return entityDeclState{}
 	}
@@ -787,7 +787,7 @@ func entDeclState(lex *jsonic.Lex) entityDeclState {
 
 // xmlDepth reads the per-parse XML nesting counter from the lex context.
 // Returns 0 if not set.
-func xmlDepth(lex *jsonic.Lex) int {
+func xmlDepth(lex *tabnas.Lex) int {
 	if lex == nil || lex.Ctx == nil {
 		return 0
 	}
@@ -800,7 +800,7 @@ func xmlDepth(lex *jsonic.Lex) int {
 }
 
 // setXmlDepth writes the XML nesting counter, clamping at zero.
-func setXmlDepth(lex *jsonic.Lex, d int) {
+func setXmlDepth(lex *tabnas.Lex, d int) {
 	if lex == nil || lex.Ctx == nil {
 		return
 	}
@@ -867,9 +867,9 @@ func decodeUTF32(b []byte, order binary.ByteOrder) string {
 // firstRule walks back through Prev links to find the originating rule
 // instance (matches the root rule used by the parser as the result
 // holder).
-func firstRule(r *jsonic.Rule) *jsonic.Rule {
+func firstRule(r *tabnas.Rule) *tabnas.Rule {
 	cur := r
-	for cur.Prev != nil && cur.Prev != jsonic.NoRule {
+	for cur.Prev != nil && cur.Prev != tabnas.NoRule {
 		cur = cur.Prev
 	}
 	return cur
@@ -973,11 +973,11 @@ func buildXmlTagMatcher(
 	entitiesOn bool,
 	strict bool,
 	embed bool,
-	xigTin, xopTin, xclTin, xscTin jsonic.Tin,
-) jsonic.MakeLexMatcher {
+	xigTin, xopTin, xclTin, xscTin tabnas.Tin,
+) tabnas.MakeLexMatcher {
 	_ = embed // embed flag is no longer needed for text-handling
-	return func(_ *jsonic.LexConfig, _ *jsonic.Options) jsonic.LexMatcher {
-		return func(lex *jsonic.Lex, _ *jsonic.Rule) *jsonic.Token {
+	return func(_ *tabnas.LexConfig, _ *tabnas.Options) tabnas.LexMatcher {
+		return func(lex *tabnas.Lex, _ *tabnas.Rule) *tabnas.Token {
 			pnt := lex.Cursor()
 			src := lex.Src
 			srclen := len(src)
@@ -1029,7 +1029,7 @@ func buildXmlTagMatcher(
 					if entitiesOn {
 						val = decode(normalised, dtdEntities(lex))
 					}
-					tkn := lex.Token("#TX", jsonic.TinTX, val, raw)
+					tkn := lex.Token("#TX", tabnas.TinTX, val, raw)
 					advance(pnt, src, sI, i)
 					return tkn
 				}
@@ -1076,7 +1076,7 @@ func buildXmlTagMatcher(
 				}
 				tsrc := src[sI:finish]
 				// §2.11 line-end normalisation applies to CDATA too.
-				tkn := lex.Token("#TX", jsonic.TinTX, normaliseLineEndings(text), tsrc)
+				tkn := lex.Token("#TX", tabnas.TinTX, normaliseLineEndings(text), tsrc)
 				advance(pnt, src, sI, finish)
 				return tkn
 			}
@@ -1787,7 +1787,7 @@ func resolveElement(
 // bad(code, start, end) fills it), and Src is what the `{src}`
 // placeholder in an error template interpolates — and what sizes the
 // caret run under the offending text.
-func badSpan(lex *jsonic.Lex, why string, from, to int) *jsonic.Token {
+func badSpan(lex *tabnas.Lex, why string, from, to int) *tabnas.Token {
 	tkn := lex.Bad(why)
 	src := lex.Src
 	if from < 0 {
@@ -1833,7 +1833,7 @@ func minInt(a, b int) int {
 // utf8.RuneCountInString; a plugin that brings its own matchers owns it.
 // Found by the fleet parity probe; the same defect was repaired in
 // tabnas/toml the same day.
-func advance(pnt *jsonic.Point, src string, from, to int) {
+func advance(pnt *tabnas.Point, src string, from, to int) {
 	pnt.SI = to
 	pnt.CI += utf8.RuneCountInString(src[from:to])
 }
