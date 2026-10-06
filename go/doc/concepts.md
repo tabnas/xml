@@ -5,11 +5,11 @@ it is. This is understanding-oriented reading; for steps see the
 [tutorial](tutorial.md) and [how-to guide](guide.md); for exact
 signatures and options see the [reference](reference.md).
 
-## A grammar plugin on the Jsonic engine
+## A grammar plugin on the tabnas engine
 
 This package is not a standalone XML parser. It is a **plugin** for the
-`jsonic` engine (`github.com/tabnas/jsonic/go`), the relaxed-JSON
-parser. Jsonic is "a grammar on an engine": a configurable,
+`tabnas` engine (`github.com/tabnas/parser/go`), the engine under the
+relaxed-JSON `jsonic` parser too. The engine is a configurable,
 matcher-based lexer plus a rule-based parser. This plugin adds XML by
 configuring that same machinery (a custom lexer matcher, four grammar
 rules, and option-driven reconfiguration) rather than hand-writing a
@@ -54,14 +54,15 @@ matching close tags).
 **Pure-XML mode** (`embed: false`, the default) reconfigures the engine
 around the XML rules: the start rule becomes `xml`, the JSON structural
 tokens are unbound, the number/string/value/comment/space lexers are
-turned off, and Jsonic's now-unreachable value rules (`val`, `map`,
-`list`, `pair`, `elem`) are deleted. A dummy fixed token bound to an
+turned off, and any value rules jsonic installed first (`val`, `map`,
+`list`, `pair`, `elem`), unreachable now, are deleted. A dummy fixed token bound to an
 illegal XML character is registered so the lexer keeps a non-empty fixed
 table; without it, XML text containing a comma would be truncated at the
 comma. The input is then pure XML.
 
-**Embed mode** (`embed: true`) leaves Jsonic's grammar intact and adds an
-XML literal as an alternate of the `val` rule. When the parser is looking
+**Embed mode** (`embed: true`) runs on a jsonic instance. It leaves
+jsonic's grammar intact and adds an XML literal as an alternate of the
+`val` rule. When the parser is looking
 for a value and sees `#XOP`/`#XSC`, it backtracks one token and pushes
 the `element` rule, building an XML subtree wherever a value was expected.
 
@@ -104,7 +105,7 @@ suites). The differences are host-language shape, not parse semantics.
 
 | Aspect            | TypeScript                                  | Go                                                         |
 | ----------------- | ------------------------------------------- | ---------------------------------------------------------- |
-| Build a parser    | `new Tabnas().use(jsonic).use(Xml, opts?)`  | `j := tabnasjsonic.Make(); j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults, opts...)` |
+| Build a parser    | `new Tabnas().use(Xml, opts?)`              | `j := tabnas.Make(); j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults, opts...)` |
 | Parse entry       | `instance.parse(src)` (returns the result)  | `j.Parse(src)` (returns `(any, error)`)                    |
 | Plugin signature  | `(tn, options) => void`                     | `func(*tabnas.Tabnas, map[string]any) error`                     |
 | Options type      | `XmlOptions` object                         | `map[string]any` (keys match `tabnasxml.Defaults`)               |

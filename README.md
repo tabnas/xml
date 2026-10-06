@@ -7,7 +7,7 @@
 [![tabnas standard](https://tabnas.github.io/status/badges/xml-standard.svg)](https://tabnas.github.io/status/)
 <!-- /tabnas-badges -->
 
-A grammar plugin for the [Jsonic](https://github.com/tabnas/jsonic) parser
+A grammar plugin for the [tabnas](https://github.com/tabnas/parser) parser
 engine that parses XML text into a tree of elements: attributes, mixed
 content, namespaces, entities, CDATA, comments, PIs, and DOCTYPE. The
 same parser ships in three languages: a TypeScript/JavaScript package
@@ -25,7 +25,7 @@ Docs, guides, the error reference and the playground: **[tabnas.dev](https://tab
 
 ```sh
 # TypeScript / JavaScript
-npm install @tabnas/parser @tabnas/jsonic @tabnas/xml
+npm install @tabnas/parser @tabnas/xml
 
 # Go
 go get github.com/tabnas/xml/go
@@ -40,10 +40,9 @@ go get github.com/tabnas/xml/go
 
 ```js
 const { Tabnas } = require('@tabnas/parser')
-const { jsonic } = require('@tabnas/jsonic')
 const { Xml } = require('@tabnas/xml')
 
-const xml = new Tabnas().use(jsonic).use(Xml)
+const xml = new Tabnas().use(Xml)
 
 xml.parse('<greeting lang="en">Hi <b>world</b></greeting>')
 // => {
@@ -57,11 +56,11 @@ xml.parse('<greeting lang="en">Hi <b>world</b></greeting>')
 
 ```go
 import (
-	tabnasjsonic "github.com/tabnas/jsonic/go"
+	tabnas "github.com/tabnas/parser/go"
 	tabnasxml "github.com/tabnas/xml/go"
 )
 
-j := tabnasjsonic.Make()
+j := tabnas.Make()
 j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults)
 result, _ := j.Parse(`<greeting lang="en">Hi <b>world</b></greeting>`)
 ```
@@ -100,12 +99,13 @@ An ASCII version is in [`ts/doc/grammar.txt`](ts/doc/grammar.txt).
 
 The grammar is defined once in the top-level
 [`xml-grammar.jsonic`](xml-grammar.jsonic).
-[`ts/embed-grammar.js`](ts/embed-grammar.js) splices its text verbatim
-into [`ts/src/xml.ts`](ts/src/xml.ts); [`go/xml.go`](go/xml.go) mirrors
+[`ts/embed-grammar.js`](ts/embed-grammar.js) reads it with jsonic at
+build time and writes it into [`ts/src/xml.ts`](ts/src/xml.ts) as JSON,
+so no runtime needs jsonic to read it; [`go/xml.go`](go/xml.go) mirrors
 the same rules, and [`rs/src/lib.rs`](rs/src/lib.rs) carries the same
-grammar as JSON, checked against the file by the Rust suite. Run
-`cd ts && npm run build` (or `npm run embed`) after editing the grammar
-to re-embed it.
+JSON, checked against the file by the Rust suite. Run
+`cd ts && npm run embed` after editing the grammar to re-embed it (the
+TypeScript suite fails while the embedded copy is stale).
 
 ## License
 

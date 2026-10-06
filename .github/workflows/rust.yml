@@ -60,8 +60,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Checked out into a NAMED directory. rs/Cargo.toml takes the
-      # engine as `path = "../../parser/rs"` (and the jsonic base grammar
-      # and the fixture runner the same way), which resolves relative to
+      # engine as `path = "../../parser/rs"` (and, for the tests, the jsonic
+      # grammar and the fixture runner the same way), which resolves relative to
       # rs/, so the siblings have to sit beside this checkout rather than
       # inside it. A bare `actions/checkout` into the workspace root
       # leaves nowhere for them to go.

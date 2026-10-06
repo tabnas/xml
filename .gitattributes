@@ -4,3 +4,8 @@
 # Preserve line endings in test fixtures - some tests depend on specific line endings
 test/fixtures/*.csv binary
 test/fixtures/*.json binary
+
+# ts/src/xml.ts embeds the grammar as JSON, written by ts/embed-grammar.js,
+# and ts/test/grammar-json.test.ts compares that block byte for byte with
+# the script's output: keep LF on every platform.
+ts/src/xml.ts text eol=lf

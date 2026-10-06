@@ -249,7 +249,7 @@ fn resolve_substitutions(table: BTreeMap<String, String>) -> BTreeMap<String, St
 }
 
 /// The error and hint catalogues an installed plugin actually carries,
-/// and the ones a bare jsonic parser carries. The two are returned
+/// and the ones the bare engine carries. The two are returned
 /// together because one of the twenty codes, `unterminated_comment`, is
 /// also a base code every grammar inherits: the plugin overrides its
 /// message rather than adding a name, so "what this plugin contributed"
@@ -262,7 +262,8 @@ struct Catalogues {
 }
 
 fn installed_catalogue() -> Catalogues {
-    let base = tabnas_jsonic::make().config();
+    // The base `make` installs on: the bare engine.
+    let base = tabnas::Tabnas::new().config();
     let installed = tabnas_xml::make().config();
     Catalogues {
         error: installed.error,

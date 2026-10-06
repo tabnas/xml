@@ -21,11 +21,24 @@ use tabnas_xml::{decode_bom, make, make_with, parse, plugin, xml, XmlOptions, GR
 
 use common::{json, repo_root, strip_ansi, to_value};
 
+/// Embed mode on a jsonic parser, the `new Tabnas().use(jsonic).use(Xml,
+/// { embed: true })` of the canonical suite. [`make_with`] builds on the
+/// bare engine, which has no jsonic document to embed XML in.
 fn embed() -> Tabnas {
-    make_with(&XmlOptions {
-        embed: true,
-        ..Default::default()
-    })
+    let mut parser = tabnas_jsonic::make();
+    parser
+        .use_plugin(
+            plugin(),
+            Some(
+                XmlOptions {
+                    embed: true,
+                    ..Default::default()
+                }
+                .to_value(),
+            ),
+        )
+        .expect("the plugin installs on a jsonic parser");
+    parser
 }
 
 fn field<'a>(value: &'a Value, key: &str) -> &'a Value {
@@ -168,7 +181,9 @@ fn errors_carry_the_code_the_position_and_the_rendered_message() {
         "{report}"
     );
     assert!(report.contains("Expected </b> but found </c>."), "{report}");
-    assert!(report.contains("[jsonic/xml_mismatched_tag]"), "{report}");
+    // `parse` builds on the engine, which tags its reports `tabnas`; a
+    // parser built on jsonic tags the same report `jsonic`.
+    assert!(report.contains("[tabnas/xml_mismatched_tag]"), "{report}");
 }
 
 /// Namespace resolution runs at DOCUMENT CLOSE, after the last token has
@@ -234,7 +249,7 @@ fn a_namespace_failure_renders_its_template_at_the_start_of_the_source() {
 
         let report = strip_ansi(&error.to_string());
         let first = report.lines().next().unwrap_or_default();
-        assert_eq!(first, format!("[jsonic/{code}]: {message}"), "{report}");
+        assert_eq!(first, format!("[tabnas/{code}]: {message}"), "{report}");
         assert!(report.contains(hint), "{report}");
         // The caret line repeats the message, so the stand-in must be
         // absent from the whole report, not merely from its first line.
@@ -794,10 +809,11 @@ fn ported_patterns_use_the_javascript_character_classes() {
 
 #[test]
 fn the_embedded_grammar_matches_xml_grammar_jsonic() {
-    // xml-grammar.jsonic is authored in jsonic and parsed at load time by
-    // the TypeScript plugin; this crate embeds the parsed form. The two
-    // are held to the same value here, through the jsonic port, so an
-    // edit to the file that is not carried into `GRAMMAR_TEXT` fails.
+    // xml-grammar.jsonic is authored in jsonic and shipped as JSON: the
+    // TypeScript plugin embeds what ts/embed-grammar.js writes, and this
+    // crate embeds the same JSON by hand. The two are held to the same
+    // value here, through the jsonic port (a dev-dependency), so an edit
+    // to the file that is not carried into `GRAMMAR_TEXT` fails.
     let path = repo_root().join("xml-grammar.jsonic");
     let source =
         fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));

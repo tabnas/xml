@@ -15,14 +15,14 @@ list, see the [reference](reference.md).
 go get github.com/tabnas/xml/go@latest
 ```
 
-The plugin runs on the `jsonic` engine
-(`github.com/tabnas/jsonic/go`), which it pulls in as a dependency.
-(While building from a source checkout before the modules are published,
-see the sibling-checkout note in the [README](../README.md).)
+The plugin runs on the `tabnas` engine
+(`github.com/tabnas/parser/go`), which it pulls in as a dependency. No
+other module is needed (embed mode, covered in the [guide](guide.md),
+also uses `jsonic`).
 
 ## 2. Parse an element
 
-`tabnasxml.Xml` is a plugin. Register it on a `jsonic` instance with
+`tabnasxml.Xml` is a plugin. Register it on an engine instance with
 `UseDefaults`, then call `Parse`:
 
 ```go
@@ -31,12 +31,12 @@ package main
 import (
 	"fmt"
 
-	tabnasjsonic "github.com/tabnas/jsonic/go"
+	tabnas "github.com/tabnas/parser/go"
 	tabnasxml "github.com/tabnas/xml/go"
 )
 
 func main() {
-	j := tabnasjsonic.Make()
+	j := tabnas.Make()
 	if err := j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults); err != nil {
 		panic(err)
 	}

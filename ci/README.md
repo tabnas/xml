@@ -39,8 +39,8 @@ Both of these were staged here and now run from `.github/workflows/`:
   so the hosted and local gates cannot drift.
 
   It needs no secrets, but it does need the four sibling checkouts the
-  crate resolves by path (`parser`, `json`, `jsonic` and `support`,
-  cloned by the job), and network access to w3.org for the W3C
+  crate resolves by path (`parser`, and for its tests `json`, `jsonic`
+  and `support`, cloned by the job), and network access to w3.org for the W3C
   conformance corpus, which the suite fetches on first use and which
   fails the run rather than skipping when it cannot be fetched. It is a
   standalone workflow rather than an arm of `ci.yml`, because `ci.yml`
