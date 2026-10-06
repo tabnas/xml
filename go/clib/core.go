@@ -24,7 +24,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	host "github.com/tabnas/jsonic/go"
+	host "github.com/tabnas/parser/go"
 	plug "github.com/tabnas/xml/go"
 )
 

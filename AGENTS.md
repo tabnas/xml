@@ -132,10 +132,11 @@ publish tagged releases). Unlike most grammar plugins, this one depends on
   `github.com/tabnas/parser/go` and `github.com/tabnas/support/go`, with
   `github.com/tabnas/json/go` indirect, and carries no `replace`.
   `go/xml.go` imports only the engine, as `tabnas` (`tabnas.Tabnas`,
-  `tabnas.Rule`, `tabnas.Options`, …). jsonic is required for
-  `go/clib/core.go`, which builds its parser with jsonic's own `Make`
-  (`host.Make()`), and for the tests, which install the plugin on a
-  jsonic engine.
+  `tabnas.Rule`, `tabnas.Options`, …), and so does the stamped C
+  library: `go/clib/core.go` builds its parser on the engine
+  (`host.Make()`, host `github.com/tabnas/parser/go`; admin's
+  `tasks/clib-rollout.tsv`). jsonic is required only for the tests, which
+  install the plugin on a jsonic engine.
 - Rust (`rs/Cargo.toml`): `tabnas = { package = "tabnas-parser", path = "../../parser/rs" }` and
   `tabnas-jsonic = { path = "../../jsonic/rs" }`, plus the
   dev-dependency `tabnas-support = { path = "../../support/rs" }` for
