@@ -16,6 +16,7 @@ package tabnasxml
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -60,9 +61,11 @@ const VERSION = "0.7.13"
 //	                                 grammar in place and splice an XML
 //	                                 literal alternate into the `val` rule
 //	                                 so `<tag>…</tag>` can appear wherever
-//	                                 Jsonic expects a value. When false
-//	                                 (default) the parser is reconfigured
-//	                                 as a pure-XML parser.
+//	                                 Jsonic expects a value. That needs a
+//	                                 jsonic host (jsonic.Make()); on any
+//	                                 other, Xml returns an error.
+//	                                 When false (default) the parser is
+//	                                 reconfigured as a pure-XML parser.
 var Defaults = map[string]any{
 	"namespaces":       true,
 	"entities":         true,
@@ -82,15 +85,29 @@ var xmlElementFields = []any{
 	"prefix", "namespace", "space", "lang",
 }
 
-// Xml is the Jsonic plugin entry point. Register via:
+// errEmbedNeedsJsonic is what Xml returns when embed mode is asked of a
+// host without the jsonic grammar. Embed mode splices XML into jsonic's
+// `val` rule; on any other host it would parse every document to nothing,
+// so the plugin refuses to install instead.
+var errEmbedNeedsJsonic = errors.New("xml: embed mode needs a jsonic host: " +
+	"install the xml plugin on a jsonic engine " +
+	"(jsonic.Make(), then UseDefaults(xml.Xml, xml.Defaults, map[string]any{\"embed\": true}))")
+
+// Xml is the plugin entry point. Register it on the engine:
 //
-//	j := jsonic.Make()
+//	j := tabnas.Make()
 //	j.UseDefaults(xml.Xml, xml.Defaults)
 //	result, err := j.Parse(src)
+//
+// Embed mode needs a jsonic host instead (jsonic.Make()); on any other
+// host Xml returns an error and installs nothing.
 func Xml(j *tabnas.Tabnas, options map[string]any) error {
 	// Guard against re-invocation: Use() re-runs plugins on SetOptions calls.
 	if j.Decoration("xml-init") != nil {
 		return nil
+	}
+	if toBool(options["embed"], false) && j.RSM()["val"] == nil {
+		return errEmbedNeedsJsonic
 	}
 	j.Decorate("xml-init", true)
 

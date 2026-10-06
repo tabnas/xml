@@ -60,7 +60,8 @@ illegal XML character is registered so the lexer keeps a non-empty fixed
 table; without it, XML text containing a comma would be truncated at the
 comma. The input is then pure XML.
 
-**Embed mode** (`embed: true`) runs on a jsonic instance. It leaves
+**Embed mode** (`embed: true`) runs on a jsonic instance, and the plugin
+refuses to install on any other. It leaves
 jsonic's grammar intact and adds an XML literal as an alternate of the
 `val` rule. When the parser is looking
 for a value and sees `#XOP`/`#XSC`, it backtracks one token and pushes

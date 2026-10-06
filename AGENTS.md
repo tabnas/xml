@@ -97,6 +97,22 @@ rules, if jsonic installed any, are dead; in **embed mode**
 (`embed: true`, on an engine with jsonic) it leaves jsonic's `val`
 wrapper in place so XML can appear inside jsonic source.
 
+**Embed mode fails fast without a jsonic host, in every port** (the
+maintainer's ruling of 2026-10-06). The plugin checks for jsonic's `val`
+rule, the one rule embed mode extends, before it changes anything; on a
+host without it (the bare engine, or jsonic installed after the plugin)
+it refuses with an error that starts
+`xml: embed mode needs a jsonic host: install the xml plugin on a jsonic engine`:
+TypeScript's `use()` throws, Go's `Use`/`UseDefaults` return it, Rust's
+`xml()`/`use_plugin` return it as a `PluginError`, and Rust's
+`make_with(&XmlOptions { embed: true, .. })`, whose signature returns a
+`Tabnas`, panics with it. Before the ruling such a parser installed and
+then parsed every document to nothing. The tests that pin it:
+`embed mode refuses a host without jsonic` in `ts/test/xml.test.ts`,
+`TestEmbedNeedsAJsonicHost` in `go/embed_test.go`, and
+`embed_mode_refuses_a_host_without_jsonic` and
+`make_with_panics_in_embed_mode` in `rs/tests/xml_test.rs`.
+
 ## Repository map
 
 | Path | What it is |

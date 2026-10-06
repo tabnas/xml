@@ -209,7 +209,8 @@ literal (`<tag>…</tag>` or `<tag/>`) is added as an alternate to the
 expected. Plain Jsonic input parses normally; an XML literal builds an
 `XmlElement` subtree in place. This mode needs jsonic applied first,
 `new Tabnas().use(jsonic).use(Xml, { embed: true })`: the bare engine has
-no `val` rule to extend.
+no `val` rule to extend, so `use` throws there, with a message that
+starts `xml: embed mode needs a jsonic host`.
 
 ## Accepted syntax
 

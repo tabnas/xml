@@ -187,6 +187,14 @@ pub const GRAMMAR_TEXT: &str = r##"
 /// plugin options.
 const PLUGIN_NAME: &str = "xml";
 
+/// What [`xml`] returns when embed mode is asked of a host without the
+/// jsonic grammar. Embed mode splices XML into jsonic's `val` rule; on any
+/// other host it would parse every document to nothing, so the plugin
+/// refuses to install instead. The same words as the TypeScript and Go
+/// plugins.
+const EMBED_NEEDS_JSONIC: &str = "xml: embed mode needs a jsonic host: install the xml plugin \
+     on a jsonic engine (tabnas_jsonic::make(), then use_plugin(tabnas_xml::plugin(), ...))";
+
 // The function references the grammar names, registered on the instance
 // before the document is installed. The two lifecycle hooks are wired by
 // name to their rule and phase when the rule is installed.
@@ -235,8 +243,9 @@ pub struct XmlOptions {
     /// true the jsonic grammar stays in place and an alternate is added
     /// to its `val` rule so a literal element (`<tag>...</tag>` or
     /// `<tag/>`) appears wherever jsonic expects a value. That needs a
-    /// parser that carries the jsonic grammar, which [`make_with`] does
-    /// not build: install [`plugin`] on `tabnas_jsonic::make()`.
+    /// parser that carries the jsonic grammar: install [`plugin`] on
+    /// `tabnas_jsonic::make()`. On any other host [`xml`] returns an
+    /// error and [`make_with`] panics.
     pub embed: bool,
 }
 
@@ -580,6 +589,12 @@ fn check_doc_text(token: Option<&Token>, context: &Context) -> Option<Token> {
 /// Installation is idempotent: an instance that already carries the
 /// `xml` rule is left alone.
 ///
+/// # Errors
+///
+/// Embed mode on a parser without jsonic's `val` rule, the bare engine
+/// among them, is refused with a [`PluginError`] that starts
+/// `xml: embed mode needs a jsonic host`, and nothing is installed.
+///
 /// ```
 /// let mut parser = tabnas::Tabnas::new();
 /// tabnas_xml::xml(&mut parser, &tabnas_xml::XmlOptions::default())?;
@@ -592,6 +607,9 @@ fn check_doc_text(token: Option<&Token>, context: &Context) -> Option<Token> {
 pub fn xml(parser: &mut Tabnas, options: &XmlOptions) -> Result<(), PluginError> {
     if parser.rules.contains_key("xml") {
         return Ok(());
+    }
+    if options.embed && !parser.rules.contains_key("val") {
+        return Err(PluginError(EMBED_NEEDS_JSONIC.to_string()));
     }
     let embed = options.embed;
     let namespaces = options.namespaces;
@@ -879,12 +897,17 @@ pub fn plugin() -> Plugin {
 /// plugin, the `new Tabnas().use(Xml, options)` of the canonical plugin
 /// and the `tabnas.Make()` plus `UseDefaults` of Go's C library.
 ///
-/// The engine carries no grammar of its own, so `embed: true` has no
-/// jsonic document to embed XML in here: for embed mode, install
-/// [`plugin`] on a jsonic parser (`tabnas_jsonic::make()`) instead.
+/// Infallible for every option but one: the grammar documents are fixed
+/// literals, so any other failure here is a bug in this crate rather than
+/// anything a caller did.
 ///
-/// Infallible by design: the grammar documents are fixed literals, so a
-/// failure here is a bug in this crate rather than anything a caller did.
+/// # Panics
+///
+/// When `options.embed` is true. The engine carries no grammar of its
+/// own, so embed mode has no jsonic document to embed XML in, and a
+/// parser built anyway would parse every document to nothing. For embed
+/// mode, install [`plugin`] on a jsonic parser (`tabnas_jsonic::make()`)
+/// instead.
 ///
 /// ```
 /// let parser = tabnas_xml::make_with(&tabnas_xml::XmlOptions {
@@ -899,9 +922,10 @@ pub fn plugin() -> Plugin {
 /// ```
 pub fn make_with(options: &XmlOptions) -> Tabnas {
     let mut parser = Tabnas::new();
-    parser
-        .use_plugin(plugin(), Some(options.to_value()))
-        .expect("the xml grammar documents are fixed and valid");
+    if let Err(error) = parser.use_plugin(plugin(), Some(options.to_value())) {
+        // Embed mode, refused by `xml` on the bare engine; or a bug here.
+        panic!("tabnas_xml::make_with: {error}");
+    }
     parser
 }
 

@@ -267,6 +267,54 @@ fn a_namespace_failure_renders_its_template_at_the_start_of_the_source() {
 // ---------------------------------------------------------------------------
 
 #[test]
+fn embed_mode_refuses_a_host_without_jsonic() {
+    // Embed mode splices XML into jsonic's `val` rule, so on the bare
+    // engine the plugin refuses to install, rather than build a parser
+    // that turns every document into nothing. The TypeScript and Go
+    // plugins refuse with the same words.
+    const WANT: &str =
+        "xml: embed mode needs a jsonic host: install the xml plugin on a jsonic engine";
+    let options = XmlOptions {
+        embed: true,
+        ..Default::default()
+    };
+
+    let mut bare = Tabnas::new();
+    let error = xml(&mut bare, &options).expect_err("embed on the bare engine is refused");
+    assert!(error.0.starts_with(WANT), "{error}");
+    assert!(
+        !bare.rule_names().iter().any(|name| name == "xml"),
+        "nothing is installed when embed mode is refused"
+    );
+
+    let mut used = Tabnas::new();
+    let error = used
+        .use_plugin(plugin(), Some(options.to_value()))
+        .err()
+        .expect("embed through use_plugin is refused too");
+    assert!(error.0.starts_with(WANT), "{error}");
+
+    // Pure mode needs no jsonic, and embed: false is pure mode.
+    let mut pure = Tabnas::new();
+    xml(&mut pure, &XmlOptions::default()).expect("pure mode installs on the engine");
+    assert_eq!(
+        json(&pure.parse("<a/>").expect("parses")),
+        r#"{"name":"a","localName":"a","attributes":{},"children":[]}"#
+    );
+}
+
+#[test]
+#[should_panic(expected = "xml: embed mode needs a jsonic host")]
+fn make_with_panics_in_embed_mode() {
+    // `make_with` builds on the bare engine and returns a parser, not a
+    // Result, so it panics rather than hand back one that cannot parse.
+    let _ = make_with(&XmlOptions {
+        embed: true,
+        ..Default::default()
+    });
+}
+
+#[test]
 fn plain_jsonic_is_unaffected_by_embed_mode() {
     let parser = embed();
     assert_eq!(

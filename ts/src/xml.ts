@@ -187,8 +187,18 @@ const grammarJson = `
 // --- END EMBEDDED xml-grammar.jsonic ---
 
 
+// Embed mode splices XML into jsonic's `val` rule, so it needs an engine
+// that already carries the jsonic grammar. Installed on any other host it
+// would parse every document to nothing, so it refuses to install instead.
+const EMBED_NEEDS_JSONIC =
+  'xml: embed mode needs a jsonic host: install the xml plugin on a ' +
+  'jsonic engine (new Tabnas().use(jsonic).use(Xml, { embed: true }))'
+
 const Xml: Plugin = (tn: Tabnas, options: XmlOptions) => {
   const embed = options.embed === true
+  if (embed && null == (tn.rule() as Record<string, unknown>).val) {
+    throw new Error(EMBED_NEEDS_JSONIC)
+  }
   // Namespace-constraint checking (unbound prefixes) is opt-in — XML
   // 1.0 well-formedness does not require prefixes to be bound.
   const strictNamespaces = options.strictNamespaces === true

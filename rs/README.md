@@ -65,7 +65,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 To install the plugin on an instance you already have, so XML sits
 beside another grammar, use the engine's plugin entry point. Here the
-other grammar is jsonic, which embed mode needs, so this example also
+other grammar is jsonic, which embed mode needs: on any other parser the
+plugin refuses to install, and `make_with` panics. So this example also
 needs `tabnas-jsonic` among your dependencies:
 
 ```rust

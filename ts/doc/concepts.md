@@ -89,7 +89,7 @@ grammar, so the parser, and the generated diagram, carry only what XML
 uses. The input is then pure XML, and the bare engine is all it needs.
 
 **Embed mode** (`embed: true`) runs on an engine with jsonic installed
-first. It leaves jsonic's grammar intact and adds an XML literal as an
+first, and the plugin refuses to install on any other. It leaves jsonic's grammar intact and adds an XML literal as an
 alternate of the `val` rule. When the parser is looking
 for a value and sees `#XOP`/`#XSC`, it backtracks one token and pushes
 the `element` rule, building an XML subtree wherever a value was

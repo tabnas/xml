@@ -176,7 +176,8 @@ removed. When `true`, Jsonic's full grammar stays and an XML literal
 (`<tag>…</tag>` or `<tag/>`) is added as an alternate to the `val` rule,
 so XML elements may appear anywhere a Jsonic value is expected. This mode
 needs a jsonic instance, `tabnasjsonic.Make()`: the bare engine has no
-`val` rule to extend.
+`val` rule to extend, so `UseDefaults` returns an error there, with a
+message that starts `xml: embed mode needs a jsonic host`.
 
 ## Accepted syntax
 

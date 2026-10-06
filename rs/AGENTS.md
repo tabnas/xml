@@ -37,11 +37,18 @@ running cargo, and expect `Cargo.lock` to move when one bumps its
 version: `../ci/rust/run.sh` exempts exactly those entries when it diffs
 the lock, and asserts everything else.
 
-Embed mode needs a jsonic parser to embed XML in, so `make_with` with
-`embed: true` builds a parser with nothing to embed into, as the
-canonical `new Tabnas().use(Xml, { embed: true })` does. A caller who
-wants embed mode installs `plugin()` on `tabnas_jsonic::make()`, which
-is what the `embed()` helper in `tests/xml_test.rs` does.
+Embed mode needs a jsonic parser to embed XML in. On any parser without
+jsonic's `val` rule, the bare engine included, `xml()` (and so
+`use_plugin`) returns an error starting `xml: embed mode needs a jsonic
+host` and installs nothing, as the TypeScript and Go plugins do, on the
+maintainer's ruling of 2026-10-06 ("fail fast, all ports"). `make_with`,
+which builds on the engine and returns a `Tabnas`, panics with that
+message for `embed: true`: its signature has no other way to refuse, and
+a parser that turns every document into nothing would be the silent
+alternative. A caller who wants embed mode installs `plugin()` on
+`tabnas_jsonic::make()`, which is what the `embed()` helper in
+`tests/xml_test.rs` does; `embed_mode_refuses_a_host_without_jsonic` and
+`make_with_panics_in_embed_mode` pin the refusals.
 
 ## The grammar is embedded, and a test holds it to the file
 
