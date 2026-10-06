@@ -1,0 +1,13 @@
+{
+  "note": "Register of tabnas runtime dependencies that differ between this repository's ports (tabnas/admin ADR-24). tools/port-deps.cjs fails on a difference that is not listed here, and on an entry that no longer matches the manifests, so the list cannot outlive what it records. Every entry states the ports that have the dependency today, the reason, and the repair.",
+  "differ": {
+    "jsonic": {
+      "ports": [
+        "rs",
+        "ts"
+      ],
+      "reason": "TypeScript: ts/src/xml.ts imports `jsonic` from @tabnas/jsonic (line 6) and reads its embedded grammar text with it when the plugin installs (`new Tabnas().use(jsonic).parse(grammarText)`, line 368); ts/package.json lists @tabnas/jsonic as a peer. Rust: rs/src/lib.rs builds `make_with`, which `make` and `parse` use, on `tabnas_jsonic::make()` (line 889), with tabnas-jsonic in [dependencies] of rs/Cargo.toml. Go: no non-test .go file under go/ imports github.com/tabnas/jsonic/go. go/xml.go builds its grammar as a GrammarSpec literal and takes the engine's types from github.com/tabnas/parser/go (tabnas/xml#83), and the C library go/clib/core.go, stamped from admin's clib template, builds its host parser on the engine since admin's rollout moved xml's host from jsonic to the engine on 2026-10-06: a probe found the two hosts' results identical on all 3,420 inputs of test/spec and test/xmlconf. go/go.mod still requires jsonic, for the tests.",
+      "repair": "To agree on not having it: ts/src/xml.ts would install its grammar from JSON (for example written by the embed step) instead of reading the jsonic-format text with jsonic, and rs/src/lib.rs would build `make_with` on the engine instead of `tabnas_jsonic::make()`; the json-for-jsonic trial of 2026-10-06 (tabnas/xml#83) records that json cannot read the grammar text, so jsonic stays wherever the text is read. To agree on having it: the Go port would import jsonic again for nothing it uses. Undecided: awaits the maintainer's ruling."
+    }
+  }
+}
