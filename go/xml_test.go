@@ -35,7 +35,7 @@ func asMap(v any) map[string]any {
 // specEntry represents one row of a TSV spec file.
 // TestSpec runs every fixture in the spec directory. FindSpecDir walks up
 // from the package directory, and Dir discovers the files by listing, so
-// adding a .tsv runs it in both runtimes without touching either runner.
+// adding a .tsv runs it in every runtime without touching any runner.
 //
 // A row is `# name<TAB>input<TAB>expected<TAB>opts<TAB>msg`. The header
 // line begins with #, which is why the columns are read by NAME and why

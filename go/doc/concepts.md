@@ -131,9 +131,9 @@ Both keep an element's attributes in the order the tag writes them, with
 any DOCTYPE defaults after them. A Go map has no order, which is why the
 attributes are the engine's ordered map rather than a `map[string]any`.
 
-In embed mode, a number value inside a Jsonic document is a `float64` in
-Go (matching `encoding/json`), for example `{a:1}` → `map[string]any{"a":
-float64(1)}`.
+In embed mode, a Jsonic object is a `*tabnas.OrderedMap` in Go, with its
+keys in source order, and a number value is a `float64` (matching
+`encoding/json`): `{a:1}` gives an ordered map whose `a` is `float64(1)`.
 
 ### Error reporting
 

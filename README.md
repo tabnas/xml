@@ -30,8 +30,8 @@ npm install @tabnas/parser @tabnas/xml
 # Go
 go get github.com/tabnas/xml/go
 
-# Rust: a sibling checkout, since the engine is not on crates.io.
-# See rs/README.md.
+# Rust (see rs/README.md)
+cargo add tabnas-xml tabnas-parser
 ```
 
 ## Example

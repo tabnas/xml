@@ -94,14 +94,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Install
 
-The `tabnas` crate is consumed as a **sibling checkout**, the standard
-tabnas development model. Clone `https://github.com/tabnas/parser` next
-to this repository and point at it:
+The crate and the engine are published on crates.io. The engine's
+package is `tabnas-parser`, imported in code as `tabnas`, so add both:
 
-```toml
-[dependencies]
-tabnas-xml = { path = "../xml/rs" }
-tabnas = { package = "tabnas-parser", path = "../parser/rs" }
+```bash
+cargo add tabnas-xml tabnas-parser
 ```
 
 Both entries are needed to name the engine. A crate's dependencies are not
@@ -109,8 +106,12 @@ passed on to its dependents, so `tabnas-xml` alone does not put `tabnas`
 in your extern prelude, and the examples above that name it would not
 resolve. Only `XmlError` is re-exported. `tabnas-jsonic` is not needed,
 except by the embed-mode example: that one does not build without
-`tabnas-jsonic = { path = "../jsonic/rs" }` and a clone of
-`https://github.com/tabnas/jsonic`.
+`cargo add tabnas-jsonic` as well.
+
+In this repository, `Cargo.toml` takes the engine from a sibling checkout
+of `https://github.com/tabnas/parser` by path instead, and the release
+workflow swaps that path for a crates.io version when it publishes this
+crate.
 
 ## Differences from the canonical TypeScript
 

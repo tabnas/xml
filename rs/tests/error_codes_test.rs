@@ -1,7 +1,7 @@
 // The error catalogue is the contract this port shares with the other
 // two runtimes, and until this file existed nothing executed that claim.
 // `../AGENTS.md` states that the package declares twenty codes with a
-// matching hint for each, that the two catalogues are "exactly in step",
+// matching hint for each, that the catalogues are "exactly in step",
 // and that `../tabnas.plugin.json` is the machine-readable list of them.
 // All three were prose. A code added to `ts/src/xml.ts` and not here, or
 // here and not there, means the two runtimes reject the same document for
