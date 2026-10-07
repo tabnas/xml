@@ -144,6 +144,25 @@ their existing dependencies provide (jsonic's `MakeJSON`; the engine's
 and jsonic's `make_json`), because importing json directly would change
 `go/go.mod` (`go mod tidy` drops its `// indirect`) or `rs/Cargo.toml`.
 
+**A derived instance keeps the plugin's options, in every port.** TS
+`tn.make()`, Go `Derive()` and Rust `derive()` build a child that re-runs
+the parent's plugins. Go and Rust re-run each with the options it was
+installed with. The TS engine re-runs each with its defaults: `use()`
+merges `plugin.defaults` over the options the child inherited. Until
+2026-10-07 a TS child therefore lost every xml option, and an embed-mode
+parser made a pure-mode child. `inheritedOptions` in `ts/src/xml.ts` now
+gives the child the parent's xml options when the parent carries the
+plugin, and records them on the child, so its own children keep them
+too. Options passed to `make()` under `plugin.xml` do not reach the
+plugin: the TS engine replaces them before the plugin runs, as it did
+before, and the child gets the parent's. Go's `Derive` takes engine
+options only, and Rust's `derive` re-runs a plugin with its installed
+options, so neither changes a plugin's options either. An engine change
+that kept inherited plugin options would make `inheritedOptions` a
+no-op, not wrong. The tests: `derived-instances` in `ts/test/xml.test.ts`,
+`go/derive_test.go`, and `derive_keeps_the_xml_options` in
+`rs/tests/xml_test.rs`.
+
 ## Repository map
 
 | Path | What it is |

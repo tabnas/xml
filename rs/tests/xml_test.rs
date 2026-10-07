@@ -422,6 +422,48 @@ fn embed_mode_installs_on_every_jsonic_host() {
 }
 
 #[test]
+fn derive_keeps_the_xml_options() {
+    // `derive` re-runs the parent's plugins with the options they were
+    // installed with, so a derived parser keeps the parent's xml options
+    // and parses as the parent does. The TypeScript make()
+    // (ts/test/xml.test.ts `derived-instances`) and the Go Derive
+    // (go/derive_test.go) are held to the same.
+    let mut custom_entities = indexmap::IndexMap::new();
+    custom_entities.insert("copy".to_string(), "©".to_string());
+    let parent = make_with(&XmlOptions {
+        strict_namespaces: true,
+        strict_entities: false,
+        custom_entities,
+        ..Default::default()
+    });
+    let child = parent.derive(|_| {}).expect("derives");
+    let grandchild = child.derive(|_| {}).expect("derives again");
+    for (name, parser) in [("child", &child), ("grandchild", &grandchild)] {
+        assert_eq!(
+            parser.parse("<a><p:b/></a>").expect_err(name).code,
+            "unbound_prefix",
+            "{name}"
+        );
+        assert_eq!(
+            json(&parser.parse("<a>&copy;&nope;</a>").expect(name)),
+            r#"{"name":"a","localName":"a","attributes":{},"children":["©&nope;"]}"#,
+            "{name}"
+        );
+    }
+
+    // Embed mode too: a derived jsonic parser keeps XML as a value.
+    let child = embed().derive(|_| {}).expect("derives");
+    let grandchild = child.derive(|_| {}).expect("derives again");
+    for (name, parser) in [("child", &child), ("grandchild", &grandchild)] {
+        assert_eq!(
+            json(&parser.parse("{x: <b>t</b>}").expect(name)),
+            r#"{"x":{"name":"b","localName":"b","attributes":{},"children":["t"]}}"#,
+            "{name}"
+        );
+    }
+}
+
+#[test]
 #[should_panic(expected = "xml: embed mode needs a jsonic host")]
 fn make_with_panics_in_embed_mode() {
     // `make_with` builds on the bare engine and returns a parser, not a

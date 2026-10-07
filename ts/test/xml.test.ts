@@ -192,6 +192,55 @@ describe('xml-embedded-in-jsonic', () => {
 })
 
 
+// ---------------------------------------------------------------------------
+// Derived instances
+//
+// `tn.make()` builds a child that re-runs the parent's plugins. The child
+// keeps the parent's xml options and parses as the parent does, as a Go
+// `Derive` (go/derive_test.go) and a Rust `derive`
+// (rs/tests/xml_test.rs `derive_keeps_the_xml_options`) do.
+// ---------------------------------------------------------------------------
+
+describe('derived-instances', () => {
+  test('make() keeps the xml options of the parent', () => {
+    const parent = new Tabnas().use(Xml, {
+      strictNamespaces: true,
+      strictEntities: false,
+      customEntities: { copy: '©' },
+    })
+    const child = parent.make()
+    const derived = { child, grandchild: child.make() }
+    for (const [name, tn] of Object.entries(derived)) {
+      assert.throws(() => tn.parse('<a><p:b/></a>'), { code: 'unbound_prefix' }, name)
+      assert.deepEqual(tn.parse('<a>&copy;&nope;</a>'), {
+        name: 'a', localName: 'a', attributes: {}, children: ['©&nope;'],
+      }, name)
+      assert.equal(tn.options.plugin.xml.strictNamespaces, true, name)
+    }
+    // The parent is unchanged, and a child of a default parser is one too.
+    assert.equal(parent.options.plugin.xml.strictNamespaces, true)
+    assert.deepEqual(new Tabnas().use(Xml).make().parse('<a/>'), {
+      name: 'a', localName: 'a', attributes: {}, children: [],
+    })
+  })
+
+  test('make() keeps embed mode', () => {
+    const want = {
+      x: { name: 'b', localName: 'b', attributes: {}, children: ['t'] },
+    }
+    const parents: Record<string, () => any> = {
+      'use(jsonic)': () => new Tabnas().use(jsonic).use(Xml, { embed: true }),
+      'legacy jsonic make()': () => (makeJsonic() as any).use(Xml, { embed: true }),
+    }
+    for (const [name, parent] of Object.entries(parents)) {
+      const child = parent().make()
+      assert.deepEqual(child.parse('{x: <b>t</b>}'), want, name)
+      assert.deepEqual(child.make().parse('{x: <b>t</b>}'), want, name)
+    }
+  })
+})
+
+
 describe('deep nesting', () => {
   // Namespace resolution walked the tree by recursion, a call per element,
   // and a document a few thousand elements deep ended in a RangeError,

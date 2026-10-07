@@ -234,7 +234,30 @@ function groupTags(tags: unknown): string[] {
   return list.map((tag) => String(tag).trim()).filter((tag) => '' !== tag)
 }
 
-const Xml: Plugin = (tn: Tabnas, options: XmlOptions) => {
+// The options this plugin runs with on `tn`. A derived instance,
+// `tn.make()`, re-runs the plugins of the instance it was made from, and
+// this engine re-runs each one with its defaults, not with the options it
+// was installed with. A derived instance therefore lost them all: an
+// embed-mode parser made a pure-mode child, a strictNamespaces one a
+// lenient child. Go's Derive and Rust's derive re-run a plugin with its
+// installed options. So when the parent carries this plugin, the child
+// runs with the parent's xml options and records them as its own, which
+// carries them on to the child's own children.
+function inheritedOptions(tn: Tabnas, options: XmlOptions): XmlOptions {
+  const parent = tn.parent
+  if (null == parent || !parent.internal().plugins.includes(Xml)) {
+    return options
+  }
+  // The engine's namespace for a plugin's options: its lower-cased name.
+  const name = Xml.name.toLowerCase()
+  const inherited = parent.options.plugin?.[name]
+  if (null == inherited) return options
+  tn.options({ plugin: { [name]: inherited } })
+  return tn.options.plugin[name]
+}
+
+const Xml: Plugin = (tn: Tabnas, installed: XmlOptions) => {
+  const options = inheritedOptions(tn, installed)
   const embed = options.embed === true
   if (embed && !jsonicHost(tn)) {
     throw new Error(EMBED_NEEDS_JSONIC)
