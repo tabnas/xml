@@ -25,7 +25,8 @@ To change options, pass a third argument to `UseDefaults`, a
 ## Parse a document
 
 Call `Parse`; the result is the root element as a tree of
-`map[string]any` / `[]any` / `string` values:
+`map[string]any` / `[]any` / `string` values, with each element's
+`attributes` a `*tabnas.OrderedMap`:
 
 ```go
 result, err := j.Parse(`<doc><child1/><child2><nested>text</nested></child2></doc>`)
@@ -166,7 +167,7 @@ j := tabnasjsonic.Make()
 j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults, map[string]any{"embed": true})
 
 r1, _ := j.Parse(`{a:1, b:"two"}`)
-// r1 == map[string]any{"a": float64(1), "b": "two"}
+// r1 is a *tabnas.OrderedMap: a == float64(1), b == "two", in source order
 
 r2, _ := j.Parse(`<a>hello</a>`)
 // r2 == an element map with children ["hello"]

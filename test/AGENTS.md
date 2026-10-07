@@ -12,7 +12,7 @@ file opens with a legend naming the columns.
 
 | Column | Meaning |
 |---|---|
-| `name` | Unique case identifier — it names the sub-test in both runtimes. |
+| `name` | Unique case identifier — it names the sub-test in every runtime. |
 | `input` | XML source. Escapes `\n` `\r` `\t` `\\` `\uXXXX` are decoded. |
 | `expected` | The parse result as JSON, or `ERROR` / `ERROR:<code>` for input that must be rejected. |
 | `opts` | Optional JSON object of plugin options (empty means defaults). |

@@ -1,9 +1,10 @@
 # Build, test and publish the TypeScript (ts/), Go (go/) and Rust (rs/)
 # implementations. ts/ is canonical; go/ and rs/ track it.
 #
-# Local build/test resolve the unpublished @tabnas siblings via the
-# repo-set go.work + node_modules symlinks (admin/scripts/link.sh), and
-# the Rust crate resolves them as sibling checkouts by path.
+# TypeScript and Go build against the published @tabnas siblings (npm, the
+# Go proxy); admin/scripts/link.sh can point them at local checkouts instead
+# (node_modules symlinks + a go.work one level up). The Rust crate resolves
+# them as sibling checkouts by path.
 
 .PHONY: all build test clean build-ts build-go build-rs test-ts test-go test-rs \
         clean-ts clean-go clean-rs publish-ts publish-go version-rs tags-go reset \
@@ -72,10 +73,10 @@ clean-rs:
 # ts/package.json. A release that bumps the TS and Go sites and forgets
 # these fails that test.
 #
-# Unlike publish-go it neither commits nor tags. There is nothing to
-# release: the crate depends on the engine (and, for its tests, the
-# jsonic grammar) by path, and crates.io does not accept a path
-# dependency, so tabnas-xml is not published. Only the constants need to
+# Unlike publish-go it neither commits nor tags, and it publishes nothing:
+# release.yml's crates job publishes tabnas-xml to crates.io from the
+# release tag, after crates-release.yml rewrites the manifest's path
+# dependencies as crates.io requirements. Here only the constants need to
 # stay in step.
 version-rs:
 	@test -n "$(V)" || (echo "Usage: make version-rs V=x.y.z" && exit 1)
