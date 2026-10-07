@@ -66,14 +66,14 @@ Detects a leading byte-order mark and returns a UTF-8 string ready for
 
 ## The result tree
 
-A parsed document is a tree of plain Go values:
+A parsed document is a tree of Go values:
 
-| Tree value      | Go type          | Notes                                        |
-| --------------- | ---------------- | -------------------------------------------- |
-| an element      | `map[string]any` | keys below                                   |
-| `children`      | `[]any`          | mixed: element maps and text strings         |
-| a text child    | `string`         |                                              |
-| `attributes`    | `map[string]any` | values are `string`                          |
+| Tree value      | Go type              | Notes                                    |
+| --------------- | -------------------- | ---------------------------------------- |
+| an element      | `map[string]any`     | keys below                               |
+| `children`      | `[]any`              | mixed: element maps and text strings     |
+| a text child    | `string`             |                                          |
+| `attributes`    | `*tabnas.OrderedMap` | values are `string`, in order (see below) |
 
 Element map keys:
 
@@ -85,12 +85,18 @@ Element map keys:
 | `namespace`  | `string` | a namespace is in scope (namespaces on)            |
 | `space`      | `string` | effective `xml:space` is non-default               |
 | `lang`       | `string` | effective `xml:lang` is set                        |
-| `attributes` | `map[string]any` | always                                      |
+| `attributes` | `*tabnas.OrderedMap` | always                                  |
 | `children`   | `[]any`  | always                                             |
 
 Namespace declarations (`xmlns`, `xmlns:*`) and `xml:space` / `xml:lang`
 remain in `attributes`; their effects are surfaced via `namespace` /
 `space` / `lang`.
+
+`attributes` is the engine's insertion-ordered map. `Keys` lists the
+attributes in the order the tag writes them, followed by the
+`<!ATTLIST>` defaults the tag leaves out, in declaration order. `Vals`
+maps each name to its value, and `Get` and `Has` look one up.
+`encoding/json` writes the attributes in the same order.
 
 ## Options
 

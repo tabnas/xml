@@ -41,13 +41,16 @@ times.
 
 ## Read attributes
 
-Attributes arrive as a `map[string]any` (string values) on each element.
-Quotes (single or double) and entity references in values are handled:
+Attributes arrive on each element as a `*tabnas.OrderedMap` of string
+values. Its `Keys` list the names in the order the tag writes them, and
+`Vals` maps each name to its value. Quotes (single or double) and entity
+references in values are handled:
 
 ```go
-result, _ := j.Parse(`<doc attr1="value1" attr2="value2"/>`)
-attrs := result.(map[string]any)["attributes"].(map[string]any)
-// attrs["attr1"] == "value1", attrs["attr2"] == "value2"
+result, _ := j.Parse(`<doc attr2="value2" attr1="value1"/>`)
+attrs := result.(map[string]any)["attributes"].(*tabnas.OrderedMap)
+// attrs.Keys == []string{"attr2", "attr1"}
+// attrs.Vals["attr1"] == "value1", attrs.Vals["attr2"] == "value2"
 ```
 
 ## Add custom entities
@@ -128,6 +131,9 @@ r1, _ := j.Parse(`<!DOCTYPE doc [<!ENTITY x "world">]><doc>hello &x;!</doc>`)
 r2, _ := j.Parse(`<!DOCTYPE doc [<!ATTLIST doc lang CDATA #FIXED "en">]><doc/>`)
 // r2.attributes == { "lang": "en" }
 ```
+
+A default goes after the attributes the tag writes, in the order the
+declarations give.
 
 The DOCTYPE declaration itself is dropped from the output; only its
 effects remain.

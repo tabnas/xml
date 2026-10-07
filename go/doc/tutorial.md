@@ -29,6 +29,7 @@ also uses `jsonic`).
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 
 	tabnas "github.com/tabnas/parser/go"
@@ -45,15 +46,16 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(result)
-	// map[attributes:map[] children:[hello] localName:a name:a]
+	out, _ := json.Marshal(result)
+	fmt.Println(string(out))
+	// {"attributes":{},"children":["hello"],"localName":"a","name":"a"}
 }
 ```
 
 Run it with `go run .`. Every element comes back as a
 `map[string]any` with four core keys: `name` (the tag as written),
 `localName` (the part after any `prefix:`), `attributes` (a
-`map[string]any` of string values), and `children` (a `[]any` mixing
+`*tabnas.OrderedMap` of string values), and `children` (a `[]any` mixing
 text strings and nested element maps).
 
 ## 3. Inspect the result
@@ -72,12 +74,13 @@ fmt.Println(children[0])     // hello
 
 The concrete types in the tree are predictable:
 
-| Tree value      | Go type          |
-| --------------- | ---------------- |
-| an element      | `map[string]any` |
-| the `children`  | `[]any`          |
-| a text child    | `string`         |
-| an attribute    | `string`         |
+| Tree value       | Go type              |
+| ---------------- | -------------------- |
+| an element       | `map[string]any`     |
+| the `children`   | `[]any`              |
+| a text child     | `string`             |
+| the `attributes` | `*tabnas.OrderedMap` |
+| an attribute     | `string`             |
 
 ## 4. Read attributes and mixed content
 
@@ -88,8 +91,8 @@ tree mirrors that structure exactly:
 result, _ := j.Parse(`<greeting lang="en">Hello, <b>world</b>!</greeting>`)
 el := result.(map[string]any)
 
-attrs := el["attributes"].(map[string]any)
-fmt.Println(attrs["lang"])           // en
+attrs := el["attributes"].(*tabnas.OrderedMap)
+fmt.Println(attrs.Vals["lang"])      // en
 
 children := el["children"].([]any)
 fmt.Println(children[0])             // Hello,
@@ -99,7 +102,9 @@ fmt.Println(children[2])             // !
 ```
 
 The `children` slice is ordered and mixed: text runs and child elements
-appear in source order. The five predefined entities (`&amp;`, `&lt;`,
+appear in source order. The attributes keep source order too: `Keys`
+lists their names as the tag writes them, and `Vals` maps each name to
+its value. The five predefined entities (`&amp;`, `&lt;`,
 …) and numeric references are decoded for you.
 
 ## 5. See namespaces resolve

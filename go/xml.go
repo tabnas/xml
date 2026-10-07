@@ -10,8 +10,12 @@
 //
 // The returned tree uses `map[string]any` nodes with keys `name`,
 // `localName`, optional `prefix`, optional `namespace`, `attributes`
-// (map of string -> string) and `children` (array of nested elements
-// or text strings).
+// and `children` (array of nested elements or text strings).
+// `attributes` is a `*tabnas.OrderedMap` of attribute name to string
+// value: its Keys hold the attributes in the order the tag writes them,
+// followed by any DOCTYPE `<!ATTLIST>` defaults the tag omits, in
+// declaration order, which is the order the TypeScript and Rust ports
+// keep.
 package tabnasxml
 
 import (
@@ -80,7 +84,8 @@ var Defaults = map[string]any{
 // element's members. The Go plugin builds elements as plain maps, so the maps
 // themselves cannot retain it. ParserSource reads this declaration from
 // ctx.Meta and uses it when it emits structural events. Annotation fields are
-// appended by namespace resolution after the four structural fields.
+// appended by namespace resolution after the four structural fields. An
+// element's attributes carry their own order: they are a *tabnas.OrderedMap.
 var xmlElementFields = []any{
 	"name", "localName", "attributes", "children",
 	"prefix", "namespace", "space", "lang",
@@ -371,7 +376,7 @@ func Xml(j *tabnas.Tabnas, options map[string]any) error {
 		"@element-open": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
 			v := r.O0.Val.(map[string]any)
 			name := v["name"].(string)
-			attrs := v["attributes"].(map[string]any)
+			attrs := v["attributes"].(*tabnas.OrderedMap)
 			r.Node = map[string]any{
 				"name":       name,
 				"localName":  name,
@@ -383,7 +388,7 @@ func Xml(j *tabnas.Tabnas, options map[string]any) error {
 		"@element-selfclose": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
 			v := r.O0.Val.(map[string]any)
 			name := v["name"].(string)
-			attrs := v["attributes"].(map[string]any)
+			attrs := v["attributes"].(*tabnas.OrderedMap)
 			r.Node = map[string]any{
 				"name":       name,
 				"localName":  name,
@@ -546,13 +551,15 @@ func dtdEntities(lex *tabnas.Lex) map[string]string {
 }
 
 // dtdAttrDefaults reads the per-parse DOCTYPE-supplied attribute
-// default map keyed by element name (set by the DOCTYPE matcher
-// path). Returns nil if none have been registered yet.
-func dtdAttrDefaults(ctx *tabnas.Context) map[string]map[string]string {
+// defaults keyed by element name (set by the DOCTYPE matcher path).
+// Each element's defaults are an ordered map of attribute name to
+// string value, in declaration order. Returns nil if none have been
+// registered yet.
+func dtdAttrDefaults(ctx *tabnas.Context) map[string]*tabnas.OrderedMap {
 	if ctx == nil || ctx.U == nil {
 		return nil
 	}
-	m, _ := ctx.U["dtdAttrDefaults"].(map[string]map[string]string)
+	m, _ := ctx.U["dtdAttrDefaults"].(map[string]*tabnas.OrderedMap)
 	return m
 }
 
@@ -581,10 +588,13 @@ func checkDocText(tkn *tabnas.Token, ctx *tabnas.Context) {
 
 // applyAttrDefaults merges in DOCTYPE-supplied default attribute
 // values for any attribute missing from the parsed element instance.
-// Returns the original map if no defaults apply.
+// The tag's own attributes keep their source order and the defaults
+// follow them in declaration order, as in ts/src/xml.ts, where the
+// defaults are added to a copy of the tag's attributes object. Returns
+// the original map if no defaults are declared for the element.
 func applyAttrDefaults(
-	attrs map[string]any, elemName string, ctx *tabnas.Context,
-) map[string]any {
+	attrs *tabnas.OrderedMap, elemName string, ctx *tabnas.Context,
+) *tabnas.OrderedMap {
 	all := dtdAttrDefaults(ctx)
 	if all == nil {
 		return attrs
@@ -593,12 +603,13 @@ func applyAttrDefaults(
 	if !ok {
 		return attrs
 	}
-	for k, v := range defaults {
-		if _, present := attrs[k]; !present {
-			attrs[k] = v
+	out := attrs.Clone()
+	for _, k := range defaults.Keys {
+		if !out.Has(k) {
+			out.Set(k, defaults.Vals[k])
 		}
 	}
-	return attrs
+	return out
 }
 
 // parseDoctypeAttlists scans a DOCTYPE internal-subset body and
@@ -606,15 +617,17 @@ func applyAttrDefaults(
 // attribute value, keyed by element name and attribute name. Both
 // literal defaults and `#FIXED "value"` defaults are returned;
 // `#REQUIRED` and `#IMPLIED` declarations contribute nothing because
-// they have no default value.
-func parseDoctypeAttlists(body string) map[string]map[string]string {
+// they have no default value. Each element's defaults are an ordered
+// map in declaration order; a repeated declaration keeps its first
+// place and takes the later value, as the TypeScript object does.
+func parseDoctypeAttlists(body string) map[string]*tabnas.OrderedMap {
 	skipSpace := func(s int) int {
 		for s < len(body) && isSpace(body[s]) {
 			s++
 		}
 		return s
 	}
-	out := map[string]map[string]string{}
+	out := map[string]*tabnas.OrderedMap{}
 
 	i := 0
 	for i < len(body) {
@@ -699,9 +712,9 @@ func parseDoctypeAttlists(body string) map[string]map[string]string {
 				}
 				value := body[valStart:j]
 				if out[elemName] == nil {
-					out[elemName] = map[string]string{}
+					out[elemName] = tabnas.NewOrderedMap()
 				}
-				out[elemName][attrName] = value
+				out[elemName].Set(attrName, value)
 				j++
 			}
 		}
@@ -1296,17 +1309,21 @@ func buildXmlTagMatcher(
 						}
 						lex.Ctx.U["dtdUnparsedEntities"] = existing
 					}
+					// Merged per element in declaration order: an attribute
+					// already declared keeps its place and takes the new
+					// value, and a new one goes last (ts/src/xml.ts merges
+					// with Object.assign, which orders them so).
 					if found := parseDoctypeAttlists(subset); len(found) > 0 {
-						existing, _ := lex.Ctx.U["dtdAttrDefaults"].(map[string]map[string]string)
+						existing, _ := lex.Ctx.U["dtdAttrDefaults"].(map[string]*tabnas.OrderedMap)
 						if existing == nil {
-							existing = map[string]map[string]string{}
+							existing = map[string]*tabnas.OrderedMap{}
 						}
 						for elem, defs := range found {
 							if existing[elem] == nil {
-								existing[elem] = map[string]string{}
+								existing[elem] = tabnas.NewOrderedMap()
 							}
-							for k, v := range defs {
-								existing[elem][k] = v
+							for _, k := range defs.Keys {
+								existing[elem].Set(k, defs.Vals[k])
 							}
 						}
 						lex.Ctx.U["dtdAttrDefaults"] = existing
@@ -1384,7 +1401,9 @@ func buildXmlTagMatcher(
 				return nil
 			}
 			i := after
-			attrs := map[string]any{}
+			// In source order: the token carries the attributes as the
+			// tag writes them, and the element keeps that order.
+			attrs := tabnas.NewOrderedMap()
 
 			for {
 				wsStart := i
@@ -1470,7 +1489,7 @@ func buildXmlTagMatcher(
 					entDeclState(lex), true); code != "" {
 					return lex.Bad(code)
 				}
-				if _, ok := attrs[attrName]; ok {
+				if attrs.Has(attrName) {
 					return lex.Bad("duplicate_attribute")
 				}
 				// §3.3.3 attribute-value normalisation: TAB/LF/CR/CRLF
@@ -1478,7 +1497,7 @@ func buildXmlTagMatcher(
 				// types, all attributes are treated as CDATA-typed
 				// (no further whitespace collapsing or trimming).
 				normalised := normaliseAttrWhitespace(raw)
-				attrs[attrName] = decode(normalised, dtdEntities(lex))
+				attrs.Set(attrName, decode(normalised, dtdEntities(lex)))
 			}
 		}
 	}
@@ -1760,7 +1779,7 @@ func resolveElement(
 	for k, v := range scope.ns {
 		local.ns[k] = v
 	}
-	if attrs, ok := element["attributes"].(map[string]any); ok {
+	if attrs, ok := element["attributes"].(*tabnas.OrderedMap); ok && attrs != nil {
 		// Pass 1: every namespace declaration on this element, plus
 		// xml:space / xml:lang. Namespaces in XML 1.0 §5.2 scopes a
 		// declaration over the whole element it appears on, *including
@@ -1768,8 +1787,12 @@ func resolveElement(
 		// must be in hand before any prefixed name is resolved.
 		// Resolving in a single pass made binding depend on attribute
 		// order, wrongly rejecting `<a p:x="1" xmlns:p="..."/>`.
-		for k, v := range attrs {
-			s, _ := v.(string)
+		//
+		// Both passes go in source order, as in TypeScript, so when
+		// one element breaks two rules the code reported is the one
+		// the first offending attribute breaks.
+		for _, k := range attrs.Keys {
+			s, _ := attrs.Vals[k].(string)
 			switch {
 			case k == "xmlns":
 				if s == xmlNSURI || s == xmlnsNSURI {
@@ -1810,7 +1833,7 @@ func resolveElement(
 		// attribute name leaves the attribute unqualified but keeps the
 		// document XML 1.0 well-formed.
 		if strict {
-			for k := range attrs {
+			for _, k := range attrs.Keys {
 				if k == "xmlns" || strings.HasPrefix(k, "xmlns:") {
 					continue
 				}
