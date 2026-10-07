@@ -1770,7 +1770,7 @@ Xml.defaults = {
 // VERSION is this package's version. It MUST equal package.json "version":
 // the release orchestrator rewrites both, and the version test fails the
 // build if they drift. Mirrors `const VERSION` in go/xml.go.
-const VERSION = '0.7.13'
+const VERSION = '0.7.14'
 
 export { Xml, decodeBOM, VERSION }
 
