@@ -594,13 +594,18 @@ The steps, in order:
    ```bash
    (
      cd go
-     go mod edit -json | grep -q '"Replace": null' || { echo 'go.mod has a replace'; exit 1; }
+     go mod edit -json | jq -e '.Replace == null' >/dev/null || { echo 'go.mod has a replace'; exit 1; }
      GOWORK=off go test -count=1 ./...
    )
    ```
 
    `-count=1` because shared fixtures live outside the Go module, so a
-   changed corpus does not invalidate the test cache.
+   changed corpus does not invalidate the test cache. The check asks jq,
+   not grep, because current Go leaves the `Replace` key out when there is
+   no replace, where older Go printed `"Replace": null`: the earlier
+   `grep -q '"Replace": null'` failed on every clean `go.mod`. `jq` reads
+   a missing key as null, so the check passes on both and fails on a
+   replace either way. The shared CI reads the same JSON with jq.
 3. **Merge the bump through a reviewed PR.** That is the house convention —
    `CONTRIBUTING.md` squash-merges PRs and takes the title as the commit
    message — and what `release.yml`'s own header describes. A direct push to
