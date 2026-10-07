@@ -5,8 +5,15 @@ import assert from 'node:assert'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { Tabnas } from '@tabnas/parser'
-import { jsonic } from '@tabnas/jsonic'
+import { Tabnas, RuleSpec } from '@tabnas/parser'
+import {
+  jsonic,
+  make as makeJsonic,
+  registerJsonicGrammar,
+} from '@tabnas/jsonic'
+// The strict-JSON host. ts/package.json does not name it: it is jsonic's
+// peer dependency, so npm installs it with jsonic.
+import { json, make as makeJson } from '@tabnas/json'
 import { Xml, decodeBOM } from '../dist/xml'
 
 
@@ -37,11 +44,65 @@ describe('xml-embedded-in-jsonic', () => {
     })
   })
 
+  // A `val` rule alone is not enough: a strict-JSON host has one, and so
+  // may any grammar. The plugin looks for jsonic's relaxed alternates on
+  // `val`, the ones in the group `jsonic`, live under the host's
+  // rule.include and rule.exclude.
+  test('embed mode refuses a host whose val is not jsonic\'s', () => {
+    const want = {
+      message: /^xml: embed mode needs a jsonic host: install the xml plugin on a jsonic engine/,
+    }
+
+    // @tabnas/json's strict-JSON parser, made both ways. The refusal
+    // comes before any change: the host is still the JSON parser it was.
+    const strict = makeJson()
+    assert.throws(() => strict.use(Xml, { embed: true }), want)
+    assert.equal((strict.rule() as Record<string, unknown>).xml, undefined)
+    assert.deepEqual(strict.parse('{"a":[1]}'), { a: [1] })
+    assert.throws(() => new Tabnas().use(json).use(Xml, { embed: true }), want)
+
+    // jsonic with its relaxed alternates shed: its own strict-JSON
+    // variant (`include: 'json'`), and the `jsonic` group excluded.
+    const strictJsonic: any = makeJsonic('json')
+    assert.throws(() => strictJsonic.use(Xml, { embed: true }), want)
+    assert.throws(
+      () => new Tabnas({ rule: { exclude: 'jsonic' } })
+        .use(jsonic).use(Xml, { embed: true }),
+      want,
+    )
+
+    // Any other grammar that defines `val`.
+    const other = (tn: Tabnas) => {
+      tn.rule('val', (rs: RuleSpec) => rs.open([{ s: '#ST', g: 'other' }]))
+    }
+    assert.throws(() => new Tabnas().use(other).use(Xml, { embed: true }), want)
+  })
+
   test('embed mode on a jsonic host installs and parses', () => {
-    const j = new Tabnas().use(jsonic).use(Xml, { embed: true })
-    assert.deepEqual(j.parse('{x: <b>t</b>}'), {
+    const want = {
       x: { name: 'b', localName: 'b', attributes: {}, children: ['t'] },
-    })
+    }
+    const j = new Tabnas().use(jsonic).use(Xml, { embed: true })
+    assert.deepEqual(j.parse('{x: <b>t</b>}'), want)
+
+    // Every way of making a jsonic host passes. The legacy make() and the
+    // bare grammar register no `jsonic` plugin, so a check on plugin names
+    // would refuse them; dropping a group other than `jsonic` keeps the
+    // host jsonic.
+    const hosts: Record<string, () => any> = {
+      'legacy make()': () => makeJsonic(),
+      registerJsonicGrammar: () => {
+        const tn = new Tabnas()
+        registerJsonicGrammar(tn as any)
+        return tn
+      },
+      'derived with make()': () => new Tabnas().use(jsonic).make(),
+      'exclude: imp': () => new Tabnas({ rule: { exclude: 'imp' } }).use(jsonic),
+    }
+    for (const [name, host] of Object.entries(hosts)) {
+      assert.deepEqual(
+        host().use(Xml, { embed: true }).parse('{x: <b>t</b>}'), want, name)
+    }
   })
 
   test('plain Jsonic is unaffected by embed mode', () => {
@@ -127,6 +188,55 @@ describe('xml-embedded-in-jsonic', () => {
     ) as any
     assert.equal(result.doc.namespace, 'http://e.example')
     assert.equal(result.doc.children[0].namespace, 'http://e.example')
+  })
+})
+
+
+// ---------------------------------------------------------------------------
+// Derived instances
+//
+// `tn.make()` builds a child that re-runs the parent's plugins. The child
+// keeps the parent's xml options and parses as the parent does, as a Go
+// `Derive` (go/derive_test.go) and a Rust `derive`
+// (rs/tests/xml_test.rs `derive_keeps_the_xml_options`) do.
+// ---------------------------------------------------------------------------
+
+describe('derived-instances', () => {
+  test('make() keeps the xml options of the parent', () => {
+    const parent = new Tabnas().use(Xml, {
+      strictNamespaces: true,
+      strictEntities: false,
+      customEntities: { copy: '©' },
+    })
+    const child = parent.make()
+    const derived = { child, grandchild: child.make() }
+    for (const [name, tn] of Object.entries(derived)) {
+      assert.throws(() => tn.parse('<a><p:b/></a>'), { code: 'unbound_prefix' }, name)
+      assert.deepEqual(tn.parse('<a>&copy;&nope;</a>'), {
+        name: 'a', localName: 'a', attributes: {}, children: ['©&nope;'],
+      }, name)
+      assert.equal(tn.options.plugin.xml.strictNamespaces, true, name)
+    }
+    // The parent is unchanged, and a child of a default parser is one too.
+    assert.equal(parent.options.plugin.xml.strictNamespaces, true)
+    assert.deepEqual(new Tabnas().use(Xml).make().parse('<a/>'), {
+      name: 'a', localName: 'a', attributes: {}, children: [],
+    })
+  })
+
+  test('make() keeps embed mode', () => {
+    const want = {
+      x: { name: 'b', localName: 'b', attributes: {}, children: ['t'] },
+    }
+    const parents: Record<string, () => any> = {
+      'use(jsonic)': () => new Tabnas().use(jsonic).use(Xml, { embed: true }),
+      'legacy jsonic make()': () => (makeJsonic() as any).use(Xml, { embed: true }),
+    }
+    for (const [name, parent] of Object.entries(parents)) {
+      const child = parent().make()
+      assert.deepEqual(child.parse('{x: <b>t</b>}'), want, name)
+      assert.deepEqual(child.make().parse('{x: <b>t</b>}'), want, name)
+    }
   })
 })
 

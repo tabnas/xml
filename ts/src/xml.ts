@@ -9,6 +9,7 @@ import { Tabnas } from '@tabnas/parser'
 import {
   Rule,
   RuleSpec,
+  RuleSpecMap,
   Plugin,
   Context,
   Config,
@@ -187,16 +188,78 @@ const grammarJson = `
 // --- END EMBEDDED xml-grammar.jsonic ---
 
 
-// Embed mode splices XML into jsonic's `val` rule, so it needs an engine
-// that already carries the jsonic grammar. Installed on any other host it
-// would parse every document to nothing, so it refuses to install instead.
+// Embed mode splices XML into jsonic's `val` rule, so it needs a host
+// whose `val` is jsonic's (see jsonicHost). On any other host it would
+// parse documents wrongly or to nothing, so it refuses to install instead.
 const EMBED_NEEDS_JSONIC =
   'xml: embed mode needs a jsonic host: install the xml plugin on a ' +
   'jsonic engine (new Tabnas().use(jsonic).use(Xml, { embed: true }))'
 
-const Xml: Plugin = (tn: Tabnas, options: XmlOptions) => {
+// Whether `tn` is a jsonic host: whether its `val` rule is jsonic's.
+//
+// jsonic tags its relaxed alternates on `val` (implicit maps and lists,
+// path dives, implicit nulls) with the group `jsonic`, in all three ports.
+// Group tags are the engine's public handle on alternates: the
+// `rule.include` and `rule.exclude` options select by them, and that is
+// how the strict-JSON hosts shed jsonic's alternates (`@tabnas/json` and
+// jsonic's own `make('json')` set `include: 'json'`). So the test is a
+// `val` alternate in that group which those two options leave live. This
+// engine filters the rules by them whenever its options change, so here
+// reading them is a safeguard. The Go and Rust engines can leave excluded
+// alternates on the rule, which is why `jsonicHost` in go/xml.go and
+// `jsonic_host` in rs/src/lib.rs read them too: the three ports make the
+// same test. The bare engine has no `val`, and no other tabnas grammar
+// tags an alternate `jsonic`.
+function jsonicHost(tn: Tabnas): boolean {
+  const val = (tn.rule() as RuleSpecMap).val
+  if (null == val) return false
+  const rule = tn.options.rule || {}
+  const include = groupTags(rule.include)
+  const exclude = groupTags(rule.exclude)
+  return [...val.def.open, ...val.def.close].some((alt) => {
+    const groups = groupTags(alt.g)
+    return groups.includes('jsonic') &&
+      (0 === include.length || groups.some((g) => include.includes(g))) &&
+      !groups.some((g) => exclude.includes(g))
+  })
+}
+
+// Group tags as a list. An alternate's `g` and the `rule.include` and
+// `rule.exclude` options are comma-separated strings, or lists once the
+// engine has normalised them.
+function groupTags(tags: unknown): string[] {
+  const list = 'string' === typeof tags
+    ? tags.split(',')
+    : Array.isArray(tags) ? tags : []
+  return list.map((tag) => String(tag).trim()).filter((tag) => '' !== tag)
+}
+
+// The options this plugin runs with on `tn`. A derived instance,
+// `tn.make()`, re-runs the plugins of the instance it was made from, and
+// this engine re-runs each one with its defaults, not with the options it
+// was installed with. A derived instance therefore lost them all: an
+// embed-mode parser made a pure-mode child, a strictNamespaces one a
+// lenient child. Go's Derive and Rust's derive re-run a plugin with its
+// installed options. So when the parent carries this plugin, the child
+// runs with the parent's xml options and records them as its own, which
+// carries them on to the child's own children.
+function inheritedOptions(tn: Tabnas, options: XmlOptions): XmlOptions {
+  const parent = tn.parent
+  if (null == parent || !parent.internal().plugins.includes(Xml)) {
+    return options
+  }
+  // The engine's namespace for a plugin's options: its lower-cased name.
+  const name = Xml.name.toLowerCase()
+  const inherited = parent.options.plugin?.[name]
+  if (null == inherited) return options
+  tn.options({ plugin: { [name]: inherited } })
+  return tn.options.plugin[name]
+}
+
+const Xml: Plugin = (tn: Tabnas, installed: XmlOptions) => {
+  const options = inheritedOptions(tn, installed)
   const embed = options.embed === true
-  if (embed && null == (tn.rule() as Record<string, unknown>).val) {
+  if (embed && !jsonicHost(tn)) {
     throw new Error(EMBED_NEEDS_JSONIC)
   }
   // Namespace-constraint checking (unbound prefixes) is opt-in — XML

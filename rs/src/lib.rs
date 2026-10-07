@@ -187,13 +187,48 @@ pub const GRAMMAR_TEXT: &str = r##"
 /// plugin options.
 const PLUGIN_NAME: &str = "xml";
 
-/// What [`xml`] returns when embed mode is asked of a host without the
-/// jsonic grammar. Embed mode splices XML into jsonic's `val` rule; on any
-/// other host it would parse every document to nothing, so the plugin
-/// refuses to install instead. The same words as the TypeScript and Go
-/// plugins.
+/// What [`xml`] returns when embed mode is asked of a host that is not a
+/// jsonic host (see [`jsonic_host`]). Embed mode splices XML into jsonic's
+/// `val` rule; on any other host it would parse documents wrongly or to
+/// nothing, so the plugin refuses to install instead. The same words as
+/// the TypeScript and Go plugins.
 const EMBED_NEEDS_JSONIC: &str = "xml: embed mode needs a jsonic host: install the xml plugin \
      on a jsonic engine (tabnas_jsonic::make(), then use_plugin(tabnas_xml::plugin(), ...))";
+
+/// Whether `parser` is a jsonic host: whether its `val` rule is jsonic's.
+///
+/// jsonic tags its relaxed alternates on `val` (implicit maps and lists,
+/// path dives, implicit nulls) with the group `jsonic`, in all three
+/// ports. Group tags are the engine's public handle on alternates: the
+/// `rule.include` and `rule.exclude` options select by them, and that is
+/// how the strict-JSON hosts shed jsonic's alternates (`tabnas_json` and
+/// jsonic's own `make_json` set `include` to `json`). So the test is a
+/// `val` alternate in that group which those two options leave enabled.
+/// This engine applies them when it parses rather than to the rule, so
+/// jsonic's `make_json` still carries the alternates it disables, and the
+/// options have to be read here. The bare engine has no `val`, and no
+/// other tabnas grammar tags an alternate `jsonic`. `jsonicHost` in
+/// `ts/src/xml.ts` and `go/xml.go` make the same test.
+fn jsonic_host(parser: &Tabnas) -> bool {
+    let Some(val) = parser.rules.get("val") else {
+        return false;
+    };
+    let tags = |list: &str| -> Vec<String> {
+        list.split(',')
+            .map(str::trim)
+            .filter(|tag| !tag.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+    let include = tags(&parser.options.rule.include);
+    let exclude = tags(&parser.options.rule.exclude);
+    val.open.iter().chain(&val.close).any(|alt| {
+        let groups = tags(&alt.g);
+        groups.iter().any(|tag| tag == "jsonic")
+            && (include.is_empty() || groups.iter().any(|tag| include.contains(tag)))
+            && !groups.iter().any(|tag| exclude.contains(tag))
+    })
+}
 
 // The function references the grammar names, registered on the instance
 // before the document is installed. The two lifecycle hooks are wired by
@@ -591,9 +626,10 @@ fn check_doc_text(token: Option<&Token>, context: &Context) -> Option<Token> {
 ///
 /// # Errors
 ///
-/// Embed mode on a parser without jsonic's `val` rule, the bare engine
-/// among them, is refused with a [`PluginError`] that starts
-/// `xml: embed mode needs a jsonic host`, and nothing is installed.
+/// Embed mode on a parser whose `val` rule is not jsonic's, the bare
+/// engine and the strict-JSON parsers among them, is refused with a
+/// [`PluginError`] that starts `xml: embed mode needs a jsonic host`, and
+/// nothing is installed.
 ///
 /// ```
 /// let mut parser = tabnas::Tabnas::new();
@@ -608,7 +644,7 @@ pub fn xml(parser: &mut Tabnas, options: &XmlOptions) -> Result<(), PluginError>
     if parser.rules.contains_key("xml") {
         return Ok(());
     }
-    if options.embed && !parser.rules.contains_key("val") {
+    if options.embed && !jsonic_host(parser) {
         return Err(PluginError(EMBED_NEEDS_JSONIC.to_string()));
     }
     let embed = options.embed;

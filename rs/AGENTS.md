@@ -37,18 +37,30 @@ running cargo, and expect `Cargo.lock` to move when one bumps its
 version: `../ci/rust/run.sh` exempts exactly those entries when it diffs
 the lock, and asserts everything else.
 
-Embed mode needs a jsonic parser to embed XML in. On any parser without
-jsonic's `val` rule, the bare engine included, `xml()` (and so
-`use_plugin`) returns an error starting `xml: embed mode needs a jsonic
-host` and installs nothing, as the TypeScript and Go plugins do, on the
-maintainer's ruling of 2026-10-06 ("fail fast, all ports"). `make_with`,
+Embed mode needs a jsonic parser to embed XML in. `jsonic_host` in
+`src/lib.rs` asks whether the parser's `val` rule is jsonic's: whether it
+carries an alternate in the group `jsonic` that `rule.include` and
+`rule.exclude` leave enabled, the test the TypeScript and Go plugins make
+(see `../AGENTS.md`). This engine applies those two options while it
+parses, not to the rule, so `tabnas_jsonic::make_json()` still carries
+jsonic's alternates, disabled by `include: json`, and reading the
+options is what refuses it. On any other parser, the bare engine and
+the strict-JSON ones included, `xml()` (and so `use_plugin`) returns an
+error starting `xml: embed mode needs a jsonic host` and installs
+nothing, as the TypeScript and Go plugins do, on the maintainer's ruling
+of 2026-10-06 ("fail fast, all ports"). `make_with`,
 which builds on the engine and returns a `Tabnas`, panics with that
 message for `embed: true`: its signature has no other way to refuse, and
 a parser that turns every document into nothing would be the silent
 alternative. A caller who wants embed mode installs `plugin()` on
 `tabnas_jsonic::make()`, which is what the `embed()` helper in
-`tests/xml_test.rs` does; `embed_mode_refuses_a_host_without_jsonic` and
-`make_with_panics_in_embed_mode` pin the refusals.
+`tests/xml_test.rs` does. `embed_mode_refuses_a_host_without_jsonic`,
+`embed_mode_refuses_a_host_whose_val_is_not_jsonics` and
+`make_with_panics_in_embed_mode` pin the refusals, and
+`embed_mode_installs_on_every_jsonic_host` the jsonic parsers that pass.
+The strict-JSON hosts there are the engine's `Tabnas::make_json()` and
+jsonic's `make_json()`: `tabnas-json` is a dependency of jsonic, not of
+this crate, and naming it would change `Cargo.toml`.
 
 ## The grammar is embedded, and a test holds it to the file
 

@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf16"
@@ -86,12 +87,72 @@ var xmlElementFields = []any{
 }
 
 // errEmbedNeedsJsonic is what Xml returns when embed mode is asked of a
-// host without the jsonic grammar. Embed mode splices XML into jsonic's
-// `val` rule; on any other host it would parse every document to nothing,
-// so the plugin refuses to install instead.
+// host that is not a jsonic host (see jsonicHost). Embed mode splices XML
+// into jsonic's `val` rule; on any other host it would parse documents
+// wrongly or to nothing, so the plugin refuses to install instead.
 var errEmbedNeedsJsonic = errors.New("xml: embed mode needs a jsonic host: " +
 	"install the xml plugin on a jsonic engine " +
 	"(jsonic.Make(), then UseDefaults(xml.Xml, xml.Defaults, map[string]any{\"embed\": true}))")
+
+// jsonicHost reports whether j is a jsonic host: whether its `val` rule is
+// jsonic's.
+//
+// jsonic tags its relaxed alternates on `val` (implicit maps and lists,
+// path dives, implicit nulls) with the group "jsonic", in all three ports.
+// Group tags are the engine's public handle on alternates: the
+// Rule.Include and Rule.Exclude options select by them, and that is how
+// the strict-JSON hosts shed jsonic's alternates (tabnas/json's Make and
+// jsonic's own MakeJSON set Include "json"). So the test is a `val`
+// alternate in that group which those two options leave live. The
+// options are read here, not trusted to have filtered the rule:
+// SetOptions filters only the alternates installed when it runs, so
+// jsonic's grammar installed after an Exclude "jsonic" keeps alternates
+// the option excludes. The bare engine has no `val`, and no other tabnas
+// grammar tags an alternate "jsonic". jsonicHost in ts/src/xml.ts and
+// jsonic_host in rs/src/lib.rs make the same test.
+func jsonicHost(j *tabnas.Tabnas) bool {
+	val := j.RSM()["val"]
+	if val == nil {
+		return false
+	}
+	var include, exclude []string
+	if rule := j.Options().Rule; rule != nil {
+		include, exclude = groupTags(rule.Include), groupTags(rule.Exclude)
+	}
+	for _, alts := range [][]*tabnas.AltSpec{val.OpenAlts(), val.CloseAlts()} {
+		for _, alt := range alts {
+			groups := groupTags(alt.G)
+			if slices.Contains(groups, "jsonic") &&
+				(len(include) == 0 || sharesTag(groups, include)) &&
+				!sharesTag(groups, exclude) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// groupTags splits a comma-separated group list, the form of an
+// alternate's G and of the Rule.Include and Rule.Exclude options.
+func groupTags(list string) []string {
+	var tags []string
+	for _, tag := range strings.Split(list, ",") {
+		if tag = strings.TrimSpace(tag); tag != "" {
+			tags = append(tags, tag)
+		}
+	}
+	return tags
+}
+
+// sharesTag reports whether the two tag lists have a tag in common.
+func sharesTag(a, b []string) bool {
+	for _, tag := range a {
+		if slices.Contains(b, tag) {
+			return true
+		}
+	}
+	return false
+}
 
 // Xml is the plugin entry point. Register it on the engine:
 //
@@ -100,13 +161,14 @@ var errEmbedNeedsJsonic = errors.New("xml: embed mode needs a jsonic host: " +
 //	result, err := j.Parse(src)
 //
 // Embed mode needs a jsonic host instead (jsonic.Make()); on any other
-// host Xml returns an error and installs nothing.
+// host, the bare engine or a strict-JSON one among them, Xml returns an
+// error and installs nothing.
 func Xml(j *tabnas.Tabnas, options map[string]any) error {
 	// Guard against re-invocation: Use() re-runs plugins on SetOptions calls.
 	if j.Decoration("xml-init") != nil {
 		return nil
 	}
-	if toBool(options["embed"], false) && j.RSM()["val"] == nil {
+	if toBool(options["embed"], false) && !jsonicHost(j) {
 		return errEmbedNeedsJsonic
 	}
 	j.Decorate("xml-init", true)

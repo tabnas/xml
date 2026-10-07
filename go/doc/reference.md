@@ -175,9 +175,13 @@ value/number/string lexers are disabled, and the JSON value rules are
 removed. When `true`, Jsonic's full grammar stays and an XML literal
 (`<tag>…</tag>` or `<tag/>`) is added as an alternate to the `val` rule,
 so XML elements may appear anywhere a Jsonic value is expected. This mode
-needs a jsonic instance, `tabnasjsonic.Make()`: the bare engine has no
-`val` rule to extend, so `UseDefaults` returns an error there, with a
-message that starts `xml: embed mode needs a jsonic host`.
+needs a jsonic instance, `tabnasjsonic.Make()`. The plugin checks that
+the `val` rule carries jsonic's own alternates, the ones in the group
+`jsonic`, and on any other host `UseDefaults` returns an error, with a
+message that starts `xml: embed mode needs a jsonic host`. The bare
+engine has no `val` rule, and a strict-JSON host such as
+`tabnasjsonic.MakeJSON()` has one without them. A host that drops the
+group with `Rule.Include` or `Rule.Exclude` fails the check too.
 
 ## Accepted syntax
 
