@@ -208,9 +208,13 @@ literal (`<tag>…</tag>` or `<tag/>`) is added as an alternate to the
 `val` rule, so an XML element may appear anywhere a Jsonic value is
 expected. Plain Jsonic input parses normally; an XML literal builds an
 `XmlElement` subtree in place. This mode needs jsonic applied first,
-`new Tabnas().use(jsonic).use(Xml, { embed: true })`: the bare engine has
-no `val` rule to extend, so `use` throws there, with a message that
-starts `xml: embed mode needs a jsonic host`.
+`new Tabnas().use(jsonic).use(Xml, { embed: true })`. The plugin checks
+that the `val` rule carries jsonic's own alternates, the ones in the
+group `jsonic`, and on any other host `use` throws, with a message that
+starts `xml: embed mode needs a jsonic host`. The bare engine has no
+`val` rule, and a strict-JSON host such as `@tabnas/json` has one without
+them. A host that drops the group with `rule.include` or `rule.exclude`
+fails the check too.
 
 ## Accepted syntax
 

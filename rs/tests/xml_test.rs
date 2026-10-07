@@ -294,6 +294,15 @@ fn embed_mode_refuses_a_host_without_jsonic() {
         .expect("embed through use_plugin is refused too");
     assert!(error.0.starts_with(WANT), "{error}");
 
+    // Installing jsonic AFTER the plugin is the same mistake: the plugin
+    // refuses first, and the jsonic installed next gets no XML rules.
+    used.use_plugin(tabnas_jsonic::plugin(), None)
+        .expect("jsonic installs after the refused plugin");
+    assert!(
+        !used.rule_names().iter().any(|name| name == "element"),
+        "the refused plugin installed nothing"
+    );
+
     // Pure mode needs no jsonic, and embed: false is pure mode.
     let mut pure = Tabnas::new();
     xml(&mut pure, &XmlOptions::default()).expect("pure mode installs on the engine");
@@ -301,6 +310,115 @@ fn embed_mode_refuses_a_host_without_jsonic() {
         json(&pure.parse("<a/>").expect("parses")),
         r#"{"name":"a","localName":"a","attributes":{},"children":[]}"#
     );
+}
+
+#[test]
+fn embed_mode_refuses_a_host_whose_val_is_not_jsonics() {
+    // A `val` rule alone is not enough: a strict-JSON parser has one, and
+    // so may any grammar. The plugin looks for jsonic's relaxed
+    // alternates on `val`, the ones in the group `jsonic`, enabled under
+    // the parser's `rule.include` and `rule.exclude`.
+    const WANT: &str =
+        "xml: embed mode needs a jsonic host: install the xml plugin on a jsonic engine";
+    let options = XmlOptions {
+        embed: true,
+        ..Default::default()
+    };
+    let other = || {
+        let mut parser = Tabnas::new();
+        let spec = tabnas::GrammarSpec::from_value(serde_json::json!({
+            "rule": { "val": { "open": [ { "s": "#ST", "g": "other" } ] } }
+        }))
+        .expect("the grammar is valid");
+        parser.grammar(&spec).expect("the grammar installs");
+        parser
+    };
+    let hosts: [(&str, Tabnas); 4] = [
+        // The engine's strict-JSON parser: the JSON rule set, every
+        // alternate tagged `json`.
+        ("tabnas::Tabnas::make_json()", Tabnas::make_json()),
+        // jsonic's strict-JSON parser. Its `val` still carries jsonic's
+        // alternates, which `include: json` disables when it parses, so
+        // the check reads the options too.
+        ("tabnas_jsonic::make_json()", tabnas_jsonic::make_json()),
+        // jsonic with the `jsonic` group excluded.
+        (
+            "exclude: jsonic",
+            tabnas_jsonic::make_with(|o| o.rule.exclude = "jsonic".to_string()),
+        ),
+        // Any other grammar that defines `val`.
+        ("another grammar's val", other()),
+    ];
+    for (name, mut host) in hosts {
+        assert!(
+            host.rule_names().iter().any(|rule| rule == "val"),
+            "{name}: the host has no val rule, so it tests nothing"
+        );
+        let error = xml(&mut host, &options).expect_err(name);
+        assert!(error.0.starts_with(WANT), "{name}: {error}");
+        assert!(
+            !host.rule_names().iter().any(|rule| rule == "xml"),
+            "{name}: nothing is installed when embed mode is refused"
+        );
+    }
+
+    // The refusal changes nothing: the strict-JSON parser still parses JSON.
+    let mut strict = Tabnas::make_json();
+    assert!(xml(&mut strict, &options).is_err());
+    assert_eq!(
+        json(&strict.parse(r#"{"a":[1]}"#).expect("parses")),
+        r#"{"a":[1.0]}"#
+    );
+}
+
+#[test]
+fn embed_mode_installs_on_every_jsonic_host() {
+    // Every way of making a jsonic parser passes the check. `jsonic()` and
+    // `register_jsonic_grammar` register no plugin, so a check on
+    // installed plugins would refuse them; dropping a group other than
+    // `jsonic` keeps the host jsonic.
+    let options = XmlOptions {
+        embed: true,
+        ..Default::default()
+    };
+    let with_plugin = || {
+        let mut parser = Tabnas::new();
+        parser
+            .use_plugin(tabnas_jsonic::plugin(), None)
+            .expect("jsonic installs");
+        parser
+    };
+    let with_jsonic = || {
+        let mut parser = Tabnas::new();
+        tabnas_jsonic::jsonic(&mut parser).expect("jsonic installs");
+        parser
+    };
+    let with_grammar = || {
+        let mut parser = Tabnas::new();
+        tabnas_jsonic::register_jsonic_grammar(&mut parser).expect("the grammar installs");
+        parser
+    };
+    let hosts: [(&str, Tabnas); 5] = [
+        ("use_plugin(tabnas_jsonic::plugin())", with_plugin()),
+        ("tabnas_jsonic::jsonic", with_jsonic()),
+        ("tabnas_jsonic::register_jsonic_grammar", with_grammar()),
+        (
+            "tabnas_jsonic::make().derive()",
+            tabnas_jsonic::make().derive(|_| {}).expect("derives"),
+        ),
+        (
+            "exclude: imp",
+            tabnas_jsonic::make_with(|o| o.rule.exclude = "imp".to_string()),
+        ),
+    ];
+    for (name, mut host) in hosts {
+        xml(&mut host, &options).unwrap_or_else(|error| panic!("{name}: {error}"));
+        assert_eq!(
+            json(&host.parse("{x: <b>t</b>}").expect(name)),
+            r#"{"x":{"name":"b","localName":"b","attributes":{},"children":["t"]}}"#,
+            "{name}"
+        );
+    }
 }
 
 #[test]

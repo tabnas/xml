@@ -98,20 +98,51 @@ rules, if jsonic installed any, are dead; in **embed mode**
 wrapper in place so XML can appear inside jsonic source.
 
 **Embed mode fails fast without a jsonic host, in every port** (the
-maintainer's ruling of 2026-10-06). The plugin checks for jsonic's `val`
-rule, the one rule embed mode extends, before it changes anything; on a
-host without it (the bare engine, or jsonic installed after the plugin)
-it refuses with an error that starts
+maintainer's ruling of 2026-10-06; the check was tightened to identify
+jsonic on 2026-10-07). Before it changes anything, the plugin checks
+that the host's `val` rule, the one rule embed mode extends, is
+jsonic's: that it carries an alternate in the group `jsonic` which the
+host's `rule.include` and `rule.exclude` options leave enabled. jsonic
+tags its relaxed alternates on `val` (implicit maps and lists, path
+dives, implicit nulls) with that group in all three ports, no other
+tabnas grammar uses it, and group tags are the engine's public handle on
+alternates: they are what `rule.include` and `rule.exclude` select by,
+and pure mode here strips jsonic with `exclude: 'jsonic,imp'`, as css,
+csv and zon do. A `val` rule alone is not enough, because a strict-JSON
+host has one too (`@tabnas/json`, and jsonic's own `make('json')`,
+`MakeJSON` and `make_json`, which shed jsonic's alternates with
+`include: 'json'`), and so may any grammar. The options are read rather
+than trusted to the rule because the engines apply them differently: TS
+filters the rules on every options change, Go only the alternates
+installed when the option is set, and Rust only while it parses, so
+jsonic's `make_json` there still carries the alternates it disables.
+The same function in each port, `jsonicHost` in `ts/src/xml.ts` and
+`go/xml.go` and `jsonic_host` in `rs/src/lib.rs`, makes the test. On any
+other host (the bare engine, a strict-JSON host, another grammar's
+`val`, or jsonic installed after the plugin) it refuses with an error
+that starts
 `xml: embed mode needs a jsonic host: install the xml plugin on a jsonic engine`:
 TypeScript's `use()` throws, Go's `Use`/`UseDefaults` return it, Rust's
 `xml()`/`use_plugin` return it as a `PluginError`, and Rust's
 `make_with(&XmlOptions { embed: true, .. })`, whose signature returns a
 `Tabnas`, panics with it. Before the ruling such a parser installed and
-then parsed every document to nothing. The tests that pin it:
-`embed mode refuses a host without jsonic` in `ts/test/xml.test.ts`,
-`TestEmbedNeedsAJsonicHost` in `go/embed_test.go`, and
-`embed_mode_refuses_a_host_without_jsonic` and
-`make_with_panics_in_embed_mode` in `rs/tests/xml_test.rs`.
+then parsed every document to nothing; before the tightening, a
+strict-JSON host passed and then embedded XML in strict JSON (TS, Go) or
+rejected every XML literal (Rust). The tests that pin it:
+`embed mode refuses a host without jsonic`,
+`embed mode refuses a host whose val is not jsonic's` and
+`embed mode on a jsonic host installs and parses` in
+`ts/test/xml.test.ts`; `TestEmbedNeedsAJsonicHost`,
+`TestEmbedNeedsJsonicsVal` and `TestEmbedOnEveryJsonicHost` in
+`go/embed_test.go`; and `embed_mode_refuses_a_host_without_jsonic`,
+`embed_mode_refuses_a_host_whose_val_is_not_jsonics`,
+`embed_mode_installs_on_every_jsonic_host` and
+`make_with_panics_in_embed_mode` in `rs/tests/xml_test.rs`. The TS test
+builds its strict-JSON host with `@tabnas/json`'s `make()`, which npm
+installs as jsonic's peer dependency. Go and Rust use strict-JSON parsers
+their existing dependencies provide (jsonic's `MakeJSON`; the engine's
+and jsonic's `make_json`), because importing json directly would change
+`go/go.mod` (`go mod tidy` drops its `// indirect`) or `rs/Cargo.toml`.
 
 ## Repository map
 
@@ -149,7 +180,10 @@ jsonic from the TypeScript and Rust runtimes:
   is `">=24"`). `@tabnas/jsonic` is a **dev-only** devDependency:
   `embed-grammar.js` reads `xml-grammar.jsonic` with it, and the tests
   build their parsers as `new Tabnas().use(jsonic).use(Xml)` and
-  exercise embed mode. `@tabnas/debug`, `@tabnas/railroad` and
+  exercise embed mode. The embed tests also import `@tabnas/json`,
+  which `ts/package.json` does not name: it is jsonic's peer
+  dependency, so npm installs it with jsonic. `@tabnas/debug`,
+  `@tabnas/railroad` and
   `@tabnas/support` are **dev-only** too — debug for the `debug-model`
   composition test, railroad to regenerate `ts/doc/grammar.{svg,txt}`,
   support for the shared fixture runner.
