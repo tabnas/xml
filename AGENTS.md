@@ -115,14 +115,12 @@ its Go tests against xml's `main` (the org workflow's workspace over the
 sibling clones), so while feed's `main` predates that change, this one on
 xml's `main` turns feed's Go tests red (18 subtests, measured).
 
-The C library's `value` JSON writes the attributes in that order too. One
-thing it lost: the stamped `jsonUnsafe` check in `go/clib/core.go`
-(admin's clib template) walks `map[string]any` and `[]any` but not
-`*tabnas.OrderedMap`, so an attribute value holding bytes that are not
-UTF-8 now reaches `value` as U+FFFD, where it used to give `valueError`.
-Text children are still checked. Every library whose values are ordered
-maps (jsonic's, json's, and the rest) has the same gap today; the repair
-belongs in the template, not in this stamp.
+The C library's `value` JSON writes the attributes in that order too. An
+attribute value holding bytes that are not UTF-8 gives `valueError`, as a
+text child's does: the stamped `jsonUnsafe` check in `go/clib/core.go`
+(admin's clib template, v6 on) walks `*tabnas.OrderedMap`, in key order,
+along with every other container a value can hold. The contract tests
+hold it to `<a x="\xff"/>`.
 
 ```typescript
 import { Tabnas } from '@tabnas/parser'
