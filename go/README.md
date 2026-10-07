@@ -39,16 +39,22 @@ func main() {
 		panic(err)
 	}
 
-	result, _ := j.Parse(`<a>Tom &amp; Jerry</a>`)
-	fmt.Println(result)
-	// map[attributes:map[] children:[Tom & Jerry] localName:a name:a]
+	result, _ := j.Parse(`<a title="T" href="/x">Tom &amp; Jerry</a>`)
+	el := result.(map[string]any)
+	fmt.Println(el["name"], el["children"])
+	// a [Tom & Jerry]
+
+	attrs := el["attributes"].(*tabnas.OrderedMap)
+	fmt.Println(attrs.Keys, attrs.Vals["href"])
+	// [title href] /x
 }
 ```
 
-The result is a tree of plain Go values: each element is a
-`map[string]any` with `name`, `localName`, `attributes`
-(`map[string]any`), and `children` (`[]any`), plus, where they apply,
-`prefix`, `namespace`, `space`, and `lang`.
+The result is a tree of Go values: each element is a `map[string]any`
+with `name`, `localName`, `attributes` (a `*tabnas.OrderedMap` of
+string values, in the order the tag writes them), and `children`
+(`[]any`), plus, where they apply, `prefix`, `namespace`, `space`, and
+`lang`.
 
 ## Documentation
 

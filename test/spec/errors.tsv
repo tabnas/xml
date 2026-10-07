@@ -56,6 +56,14 @@ ns-uri-with-tab	<a xmlns:m="http://x.example/\t/y"/>	ERROR:invalid_namespace_uri
 default-ns-uri-with-space	<a xmlns="http://x.example/ /y"/>	ERROR:invalid_namespace_uri
 ns-uri-trailing-space	<a xmlns="http://x.example/ "/>	ERROR:invalid_namespace_uri
 
+# One element can break two namespace rules at once. Every runtime reads an
+# element's attributes in the order the tag writes them, so the code is the
+# one the first offending attribute breaks.
+ns-first-offence-uri	<a xmlns:p="a b" xmlns:xmlns="x"/>	ERROR:invalid_namespace_uri
+ns-first-offence-reserved	<a xmlns:xmlns="x" xmlns:p="a b"/>	ERROR:reserved_namespace
+ns-first-offence-default-reserved	<a xmlns="http://www.w3.org/2000/xmlns/" xmlns:p="a b"/>	ERROR:reserved_namespace
+ns-first-offence-default-uri	<a xmlns:p="a b" xmlns="http://www.w3.org/2000/xmlns/"/>	ERROR:invalid_namespace_uri
+
 # Error templates must interpolate. The `msg` column pins the rendered
 # text, so a template that reverts to a literal `$fsrc` / `$openname`
 # placeholder fails here instead of shipping.

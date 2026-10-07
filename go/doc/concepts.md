@@ -24,7 +24,8 @@ The **lexer** turns source text into tokens. The plugin registers one
 custom matcher (`xmltag`, at a high priority order) that recognises
 everything starting with `<` and emits five token kinds:
 
-- `#XOP`. Open tag, carrying `map[string]any{"name", "attributes"}`
+- `#XOP`. Open tag, carrying `map[string]any{"name", "attributes"}`,
+  with the attributes in a `*tabnas.OrderedMap` in source order
 - `#XSC`. Self-closing tag, carrying the same
 - `#XCL`. Close tag, carrying the name `string`
 - `#TX`. A run of character data (or a CDATA body)
@@ -116,15 +117,19 @@ suites). The differences are host-language shape, not parse semantics.
 ### Value types
 
 The TypeScript result is the `XmlElement` interface; the Go result is an
-untyped tree of plain values:
+untyped tree of values:
 
 | Tree value   | TypeScript                       | Go                 |
 | ------------ | -------------------------------- | ------------------ |
 | an element   | `XmlElement` object              | `map[string]any`   |
 | `children`   | `Array<XmlElement \| string>`    | `[]any`            |
-| `attributes` | `Record<string, string>`         | `map[string]any` (string values) |
+| `attributes` | `Record<string, string>`         | `*tabnas.OrderedMap` (string values) |
 | a text child | `string`                         | `string`           |
 | optional fields | absent properties             | absent map keys    |
+
+Both keep an element's attributes in the order the tag writes them, with
+any DOCTYPE defaults after them. A Go map has no order, which is why the
+attributes are the engine's ordered map rather than a `map[string]any`.
 
 In embed mode, a number value inside a Jsonic document is a `float64` in
 Go (matching `encoding/json`), for example `{a:1}` → `map[string]any{"a":

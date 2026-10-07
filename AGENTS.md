@@ -83,6 +83,47 @@ A parsed element is `{ name, prefix?, localName, namespace?, space?,
 lang?, attributes, children }` where `children` is a mixed array of text
 strings and nested elements.
 
+**`attributes` keeps source order in every port.** The attributes come in
+the order the tag writes them, then the `<!ATTLIST>` defaults the tag
+leaves out, in declaration order (a repeated declaration keeps its first
+place and takes the later value). TypeScript gets that from its object's
+insertion order and Rust from its `IndexMap`. In Go an element is a
+`map[string]any`, and its `attributes` is a `*tabnas.OrderedMap`, the
+engine's insertion-ordered map (`Keys`/`Vals`, `Get`/`Has`, and a
+`MarshalJSON` that writes the keys in order); `go/attributes_test.go` pins
+the order. The element map itself stays plain: its member order is
+declared once, in `xmlElementFields`, for consumers that emit events.
+
+That is a visible change to the Go API, made on the maintainer's
+instruction of 2026-10-07. Up to go/v0.7.14 the Go port built
+`attributes` as a plain `map[string]any`. A Go map has no order, and
+ranging over one starts at a random place, so two things varied from run
+to run: feed's Go port wrote XHTML content with its attributes in a
+different order on different runs (7 of the 4,106 inputs under feed's
+`test/` differed between runs of one build), and when one element broke
+two namespace rules, `resolveNamespaces` reported either code
+(`errors.tsv` rows `ns-first-offence-*` now pin the first one, in source
+order, in all three runtimes). A Go caller that type-asserts
+`el["attributes"].(map[string]any)` must take `*tabnas.OrderedMap`
+instead; `tabnas.AsStringMap` gives the `Vals` of either shape to code
+that only looks values up. Feed is the one consumer in the fleet that
+type-asserts them: its Go port reads both shapes from the change that
+accompanies this one, but up to 0.6.14 it reads only the plain map, and
+on this release it would see no attributes at all. A module must not take
+this xml release without a feed release that reads both. Feed's CI runs
+its Go tests against xml's `main` (the org workflow's workspace over the
+sibling clones), so while feed's `main` predates that change, this one on
+xml's `main` turns feed's Go tests red (18 subtests, measured).
+
+The C library's `value` JSON writes the attributes in that order too. One
+thing it lost: the stamped `jsonUnsafe` check in `go/clib/core.go`
+(admin's clib template) walks `map[string]any` and `[]any` but not
+`*tabnas.OrderedMap`, so an attribute value holding bytes that are not
+UTF-8 now reaches `value` as U+FFFD, where it used to give `valueError`.
+Text children are still checked. Every library whose values are ordered
+maps (jsonic's, json's, and the rest) has the same gap today; the repair
+belongs in the template, not in this stamp.
+
 ```typescript
 import { Tabnas } from '@tabnas/parser'
 import { Xml } from '@tabnas/xml'
@@ -266,7 +307,8 @@ builds them first.
 4. Keep the three grammars aligned. The grammar text is shared in spirit
    (`xml-grammar.jsonic` is embedded as JSON in TS and Rust; Go reproduces the
    same rule chain in `xml.go`). The rule pruning, token set, and element
-   shape must match across runtimes.
+   shape must match across runtimes, and so must the order of an
+   element's attributes (see "What this project is").
 5. The parser deliberately does **not** implement every XML 1.0
    well-formedness constraint. That is intentional; the W3C conformance
    floors are regression guards, not a 100%-conformance target — but the
@@ -368,6 +410,10 @@ token names shown in `ts/doc/grammar.svg`.
   carries `// =>` but yields no assertion is a **failure**, not a
   silently dropped block.
 - `go/xml_test.go` — the Go unit tests + the `.tsv` spec runner.
+- `go/attributes_test.go` — the order of an element's attributes (source
+  order, then DOCTYPE defaults), which the fixtures cannot pin because
+  they compare after a JSON round trip, and the namespace code an element
+  that breaks two rules reports, over repeated parses.
 - `rs/tests/parity_test.rs` — the Rust `.tsv` runner and the named-column
   census; `rs/tests/xml_test.rs` the in-language cases;
   `rs/tests/error_codes_test.rs` the error catalogue, read out of
