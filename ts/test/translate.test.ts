@@ -15,4 +15,6 @@ test('translation parts expose the manifest, source and explicit entry', () => {
   assert.equal(parts.lift, undefined)
   assert.equal(parts.render?.entry, 'xml-render')
   assert.equal(parts.render?.source, readFileSync(path.join(root, 'alchemy', 'render.alc'), 'utf8'))
+  assert.equal(parts.embed?.entry, 'xml-embed')
+  assert.equal(parts.embed?.source, readFileSync(path.join(root, 'alchemy', 'embed.alc'), 'utf8'))
 })

@@ -30,4 +30,14 @@ func TestTranslationParts(t *testing.T) {
 	if parts.Render.Source != string(render) {
 		t.Fatal("embedded render differs from alchemy/render.alc")
 	}
+	if parts.Embed == nil || parts.Embed.Entry != "xml-embed" {
+		t.Fatalf("embed entry is %#v", parts.Embed)
+	}
+	embed, err := os.ReadFile("../alchemy/embed.alc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parts.Embed.Source != string(embed) {
+		t.Fatal("embedded embed differs from alchemy/embed.alc")
+	}
 }

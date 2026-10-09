@@ -20,7 +20,8 @@
 ; element, a name, localName, prefix, namespace, space or lang that is
 ; not a string, attributes that are not an object, children that are not
 ; an array, an attribute whose value is an object or an array, and a
-; child that is an array fail with INPUT_INVALID, naming what was met.
+; child that is an array fail with TARGET_VALUE_UNREPRESENTABLE, naming
+; what was met.
 ;
 ; An element with no children is written `<name a="v"/>`, and otherwise
 ; `<name a="v">`, its children, `</name>`: the opening tag's `>` is held
@@ -66,7 +67,7 @@
 ; of the phase and is popped with its value. Nothing is kept per
 ; attribute or per child. Once the root element is written the state is
 ; `[:root-done]`, and nothing may follow it. Events no tree has fail
-; with INPUT_INVALID, saying so.
+; with PROTOCOL_ORDER_ERROR, saying so.
 
 ; The top marker, or :none before the root element.
 def xml-top [s]
@@ -116,11 +117,11 @@ def xml-attr [value]
 ; A member met out of its place, or one no element has.
 def xml-wrong-member [name]
   match name
-    case "name" (fail "the tree is not an XML element: its member name is out of place, where an element's members are name, localName, attributes and children, in that order")
-    case "localName" (fail "the tree is not an XML element: its member localName is out of place, where an element's members are name, localName, attributes and children, in that order")
-    case "attributes" (fail "the tree is not an XML element: its member attributes is out of place, where an element's members are name, localName, attributes and children, in that order")
-    case "children" (fail "the tree is not an XML element: its member children is out of place, where an element's members are name, localName, attributes and children, in that order")
-    case _ (fail "the tree is not an XML element: it has a member that is not one of name, localName, attributes and children")
+    case "name" (fail :unrepresentable "the tree is not an XML element: its member name is out of place, where an element's members are name, localName, attributes and children, in that order")
+    case "localName" (fail :unrepresentable "the tree is not an XML element: its member localName is out of place, where an element's members are name, localName, attributes and children, in that order")
+    case "attributes" (fail :unrepresentable "the tree is not an XML element: its member attributes is out of place, where an element's members are name, localName, attributes and children, in that order")
+    case "children" (fail :unrepresentable "the tree is not an XML element: its member children is out of place, where an element's members are name, localName, attributes and children, in that order")
+    case _ (fail :unrepresentable "the tree is not an XML element: it has a member that is not one of name, localName, attributes and children")
 
 ; A member the reader derives from the name and the attributes, read and
 ; not written: its keyword goes on top of the phase until its value is
@@ -138,17 +139,17 @@ def xml-annotation [name s]
 ; a value where a key is due, or a root that is not an element.
 def xml-misplaced [s]
   match (xml-top s)
-    case :none (fail "the tree is not an XML element: an element is an object whose members are name, localName, attributes and children")
-    case :name (fail "the tree is not an XML element: its name is not a string")
-    case :local (fail "the tree is not an XML element: its localName is not a string")
-    case :prefix (fail "the tree is not an XML element: its prefix is not a string")
-    case :namespace (fail "the tree is not an XML element: its namespace is not a string")
-    case :space (fail "the tree is not an XML element: its space is not a string")
-    case :lang (fail "the tree is not an XML element: its lang is not a string")
-    case :attribute (fail "the tree is not an XML element: an attribute's value is an object or an array, where XML has text")
-    case :attributes-start (fail "the tree is not an XML element: its attributes are not an object")
-    case :children-start (fail "the tree is not an XML element: its children are not an array")
-    case _ (fail "the events hold a value where a key is due, which a tree's never do")
+    case :none (fail :unrepresentable "the tree is not an XML element: an element is an object whose members are name, localName, attributes and children")
+    case :name (fail :unrepresentable "the tree is not an XML element: its name is not a string")
+    case :local (fail :unrepresentable "the tree is not an XML element: its localName is not a string")
+    case :prefix (fail :unrepresentable "the tree is not an XML element: its prefix is not a string")
+    case :namespace (fail :unrepresentable "the tree is not an XML element: its namespace is not a string")
+    case :space (fail :unrepresentable "the tree is not an XML element: its space is not a string")
+    case :lang (fail :unrepresentable "the tree is not an XML element: its lang is not a string")
+    case :attribute (fail :unrepresentable "the tree is not an XML element: an attribute's value is an object or an array, where XML has text")
+    case :attributes-start (fail :unrepresentable "the tree is not an XML element: its attributes are not an object")
+    case :children-start (fail :unrepresentable "the tree is not an XML element: its children are not an array")
+    case _ (fail :protocol-order "the events hold a value where a key is due, which a tree's never do")
 
 ; A member whose value is read and not written, which must still be a
 ; string: the state after it, or the failure naming it.
@@ -164,7 +165,7 @@ def xml-key [name s]
     case :name-key
       match name
         case "name" (transition (xml-mark :name s) [])
-        case _ (fail "the tree is not an XML element: its first member is not name, where an element's members are name, localName, attributes and children")
+        case _ (fail :unrepresentable "the tree is not an XML element: its first member is not name, where an element's members are name, localName, attributes and children")
     case :local-key
       match name
         case "localName" (transition (xml-mark :local s) [])
@@ -179,7 +180,7 @@ def xml-key [name s]
         case "children" (transition (xml-mark :children-start s) [])
         case _ (xml-annotation name s)
     case :end (xml-annotation name s)
-    case _ (fail "the events hold a key where a value is due, which a tree's never do")
+    case _ (fail :protocol-order "the events hold a key where a value is due, which a tree's never do")
 
 ; A scalar, in the phase that awaits it: the name, which opens the tag
 ; and goes under the phase for the close tag; an attribute's value,
@@ -215,8 +216,8 @@ def xml-object [s]
 def xml-array [s]
   match (xml-top s)
     case :children-start (transition (xml-mark :first-child s) [])
-    case :first-child (fail "the tree is not an XML element: a child is an array, where XML has text or an element")
-    case :child (fail "the tree is not an XML element: a child is an array, where XML has text or an element")
+    case :first-child (fail :unrepresentable "the tree is not an XML element: a child is an array, where XML has text or an element")
+    case :child (fail :unrepresentable "the tree is not an XML element: a child is an array, where XML has text or an element")
     case _ (xml-misplaced s)
 
 ; An object's end: the attributes', after which the children are due,
@@ -226,16 +227,16 @@ def xml-object-end [s]
   match (xml-top s)
     case :attribute-key (transition (xml-mark :children-key s) [])
     case :end (xml-close s)
-    case :name-key (fail "the tree is not an XML element: an element is an object whose members are name, localName, attributes and children")
-    case :local-key (fail "the tree is not an XML element: it has no localName, where an element's members are name, localName, attributes and children")
-    case :attributes-key (fail "the tree is not an XML element: it has no attributes, where an element's members are name, localName, attributes and children")
-    case :children-key (fail "the tree is not an XML element: it has no children, where an element's members are name, localName, attributes and children")
-    case :first-child (fail "the events end an object inside an array, which a tree's never do")
-    case :child (fail "the events end an object inside an array, which a tree's never do")
-    case :none (fail "the events end an object that is not open, which a tree's never do")
-    case :attributes-start (fail "the events end an object that is not open, which a tree's never do")
-    case :children-start (fail "the events end an object that is not open, which a tree's never do")
-    case _ (fail "the events end an object after a key and before its value, which a tree's never do")
+    case :name-key (fail :unrepresentable "the tree is not an XML element: an element is an object whose members are name, localName, attributes and children")
+    case :local-key (fail :unrepresentable "the tree is not an XML element: it has no localName, where an element's members are name, localName, attributes and children")
+    case :attributes-key (fail :unrepresentable "the tree is not an XML element: it has no attributes, where an element's members are name, localName, attributes and children")
+    case :children-key (fail :unrepresentable "the tree is not an XML element: it has no children, where an element's members are name, localName, attributes and children")
+    case :first-child (fail :protocol-order "the events end an object inside an array, which a tree's never do")
+    case :child (fail :protocol-order "the events end an object inside an array, which a tree's never do")
+    case :none (fail :protocol-order "the events end an object that is not open, which a tree's never do")
+    case :attributes-start (fail :protocol-order "the events end an object that is not open, which a tree's never do")
+    case :children-start (fail :protocol-order "the events end an object that is not open, which a tree's never do")
+    case _ (fail :protocol-order "the events end an object after a key and before its value, which a tree's never do")
 
 def xml-close [s]
   let [s2 (pop (pop s))]
@@ -249,11 +250,11 @@ def xml-array-end [s]
   match (xml-top s)
     case :first-child (transition (xml-mark :end s) ["/>"])
     case :child (transition (xml-mark :end s) ["</" (top (pop s)) ">"])
-    case _ (fail "the events end an array that is not open, which a tree's never do")
+    case _ (fail :protocol-order "the events end an array that is not open, which a tree's never do")
 
 def xml-step [s event]
   match (xml-top s)
-    case :root-done (fail "the events hold more after the root element, which a tree's never do")
+    case :root-done (fail :protocol-order "the events hold more after the root element, which a tree's never do")
     case _ (xml-event s event)
 
 def xml-event [s event]
@@ -268,8 +269,8 @@ def xml-event [s event]
 def xml-finish [s]
   match (xml-top s)
     case :root-done []
-    case :none (fail "the events hold no value, where a tree's hold one")
-    case _ (fail "the events ended inside an element")
+    case :none (fail :protocol-order "the events hold no value, where a tree's hold one")
+    case _ (fail :protocol-order "the events ended inside an element")
 
 ; The render: the tree's events in, the document's text out.
 def xml-render [input]

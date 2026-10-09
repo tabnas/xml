@@ -2,13 +2,16 @@
 // embeds are the same files.
 //
 // A packaged crate holds nothing outside `rs/`, so the crate embeds its
-// own copies, `rs/translate/manifest.json` of `tabnas.plugin.json` and
-// `rs/translate/render.alc` of the render the manifest names, as
-// `manifest_text()` and `render_text()`. The copies are the only texts a
-// host sees, so they must be the files: this holds the embedded manifest
-// to the repository's, and the render the manifest names, read from the
-// repository, to the embedded one. Change the file at the root and copy
-// it into `rs/translate/`; this fails until both are the same.
+// own copies, `rs/translate/manifest.json` of `tabnas.plugin.json`,
+// `rs/translate/render.alc` of the render the manifest names and
+// `rs/translate/embed.alc` of the embedding it names, as
+// `manifest_text()`, `render_text()` and `translate().embed`. The copies
+// are the only texts a host sees, so they must be the files: this holds
+// the embedded manifest to the repository's, and the render and the
+// embedding the manifest names, read from the repository, to the
+// embedded ones. Change the file at the root and run `npm run embed`
+// (from `ts/`), which copies it into `rs/translate/`; this fails until
+// both are the same.
 
 mod common;
 
@@ -53,23 +56,49 @@ fn the_render_the_manifest_names_is_the_one_the_crate_embeds() {
 }
 
 #[test]
-fn the_structural_interface_names_the_render_entry() {
+fn the_embed_the_manifest_names_is_the_one_the_crate_embeds() {
+    let translate = translate();
+    let path = translate["embed"]
+        .as_str()
+        .expect("translate.embed names a file");
+    let on_disk = fs::read_to_string(common::repo_root().join(path))
+        .unwrap_or_else(|e| panic!("translate.embed names {path}, which cannot be read: {e}"));
+    let parts = tabnas_xml::translate().expect("XML carries translation parts");
+    let embed = parts.embed.expect("XML carries an embedding");
+    assert_eq!(
+        Some(on_disk.as_str()),
+        embed.source,
+        "translate.embed names {path}, and rs/translate/embed.alc, which the crate \
+         embeds, is another text: run npm run embed"
+    );
+}
+
+#[test]
+fn the_structural_interface_names_the_render_and_embed_entries() {
     let parts = tabnas_xml::translate().expect("XML carries translation parts");
     assert_eq!(parts.manifest, tabnas_xml::manifest_text());
     assert_eq!(parts.lift, None);
     let render = parts.render.expect("XML carries a render");
     assert_eq!(render.entry, "xml-render");
     assert_eq!(render.source, Some(tabnas_xml::render_text()));
+    let embed = parts.embed.expect("XML carries an embedding");
+    assert_eq!(embed.entry, "xml-embed");
+    assert!(embed.source.is_some(), "the embedding is XML's own file");
 }
 
 /// XML is read as a tree and written from one: the element tree its
 /// reader builds, whose events carry it already, so there is no lift,
-/// and no accessor for one.
+/// and no accessor for one. That tree has a schema of its own, which a
+/// plain tree reaches through the embedding, and the render takes a
+/// root of any kind.
 #[test]
 fn xml_reads_and_writes_a_tree_with_no_lift() {
     let translate = translate();
     assert_eq!(translate["reads"], "tree");
     assert_eq!(translate["writes"], "tree");
+    assert_eq!(translate["root"], "any");
+    assert_eq!(translate["schema"], "xml-element");
+    assert_eq!(translate["embed"], "alchemy/embed.alc");
     assert_eq!(translate.get("lift"), None);
 }
 
@@ -95,6 +124,22 @@ fn the_loss_is_a_list_of_sentences() {
         first.contains("name, localName, attributes and children"),
         "the first loss line does not say which trees the render writes: {first:?}"
     );
+    assert!(
+        loss.iter()
+            .filter_map(Value::as_str)
+            .any(|line| line.contains("the element document")
+                && line.contains("member elements")
+                && line.contains("item elements")),
+        "no loss line says how the embedding writes a plain tree: {loss:?}"
+    );
+}
+
+/// The names a library of alchemy definitions defines, in its order.
+fn definitions(text: &str) -> Vec<&str> {
+    text.lines()
+        .filter_map(|line| line.strip_prefix("def "))
+        .filter_map(|rest| rest.split_whitespace().next())
+        .collect()
 }
 
 /// A host links the render with its own program and other formats'
@@ -102,13 +147,33 @@ fn the_loss_is_a_list_of_sentences() {
 /// `xml-render`, and the file defines no `export` of its own.
 #[test]
 fn the_render_is_a_library_named_for_xml() {
-    let names: Vec<&str> = tabnas_xml::render_text()
-        .lines()
-        .filter_map(|line| line.strip_prefix("def "))
-        .filter_map(|rest| rest.split_whitespace().next())
-        .collect();
+    let names = definitions(tabnas_xml::render_text());
     assert!(names.contains(&"xml-render"), "{names:?}");
     for name in &names {
         assert!(name.starts_with("xml-"), "{name} is not named for XML");
+    }
+}
+
+/// The embedding is linked beside the render, so it is a library named
+/// for XML too, with no `export`, and with both entry points: the
+/// embedding and its reverse. None of its names is one of the render's,
+/// since the two are linked into one namespace.
+#[test]
+fn the_embed_is_a_library_named_for_xml() {
+    let parts = tabnas_xml::translate().expect("XML carries translation parts");
+    let embed = parts
+        .embed
+        .and_then(|part| part.source)
+        .expect("XML carries an embedding");
+    let names = definitions(embed);
+    assert!(names.contains(&"xml-embed"), "{names:?}");
+    assert!(names.contains(&"xml-unembed"), "{names:?}");
+    let render = definitions(tabnas_xml::render_text());
+    for name in &names {
+        assert!(name.starts_with("xml-"), "{name} is not named for XML");
+        assert!(
+            !render.contains(name),
+            "{name} is defined by the render too"
+        );
     }
 }

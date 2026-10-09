@@ -62,9 +62,14 @@
   "translate": {
     "reads": "tree",
     "writes": "tree",
+    "root": "any",
+    "schema": "xml-element",
+    "embed": "alchemy/embed.alc",
     "render": "alchemy/render.alc",
     "loss": [
-      "Only an element tree is written, the one the reader builds: an object whose members are name, localName, attributes and children, with text and elements as children; any other tree is refused.",
+      "An element tree, the one the reader builds, is written as it is: an object whose members are name, localName, attributes and children, with text and elements as children.",
+      "A plain tree, from another format or a program, is written through the embedding and read back by the same convention: the root value as the element document, an object as an element of type=\"object\" whose members are member elements, each with a name attribute holding its key, and an array as an element of type=\"array\" whose elements are item elements.",
+      "In the embedding a string is its element's text and an empty string an element of type=\"string\" with no text; a number is its text in an element of type=\"number\", INF, -INF or NaN where it is not finite; a boolean is true or false in an element of type=\"boolean\"; and null is an element of type=\"null\" with no text.",
       "The XML declaration, the DOCTYPE, comments and processing instructions are not kept: an entity the DOCTYPE declared is written as its replacement text, and an attribute it defaulted is written on the element.",
       "CDATA sections are not kept: their text is written as escaped character data, and two texts the reader read either side of a CDATA section, a comment or a processing instruction read back as one; an empty text child is written as an empty CDATA section, the one spelling that reads back as one.",
       "Namespace prefixes are written as part of the name; localName, prefix, namespace, space and lang are not written, since a reader derives them again from the name and from the xmlns, xml:space and xml:lang attributes, which are kept.",

@@ -12,17 +12,24 @@ type TranslationPart struct {
 type TranslationParts struct {
 	Manifest string
 	Lift     *TranslationPart
-	Render   *TranslationPart
+	// Embed is an optional embedding of a plain tree in the format's
+	// schema, with its reverse.
+	Embed  *TranslationPart
+	Render *TranslationPart
 }
 
 //go:embed translate/manifest.json
 var translationManifest string
+
+//go:embed translate/embed.alc
+var translationEmbed string
 
 //go:embed translate/render.alc
 var translationRender string
 
 var translationParts = TranslationParts{
 	Manifest: translationManifest,
+	Embed:    &TranslationPart{Entry: "xml-embed", Source: translationEmbed},
 	Render:   &TranslationPart{Entry: "xml-render", Source: translationRender},
 }
 
