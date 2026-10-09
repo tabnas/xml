@@ -104,7 +104,8 @@ fn xml_reads_and_writes_a_tree_with_no_lift() {
 
 /// The host prints the loss lines verbatim, so each is a sentence. The
 /// render writes the reader's element tree and no other, so the first
-/// says which trees it carries.
+/// says which trees it carries; the embedding's conventions are said
+/// too, the one for a string or a key XML cannot carry among them.
 #[test]
 fn the_loss_is_a_list_of_sentences() {
     let translate = translate();
@@ -131,6 +132,12 @@ fn the_loss_is_a_list_of_sentences() {
                 && line.contains("member elements")
                 && line.contains("item elements")),
         "no loss line says how the embedding writes a plain tree: {loss:?}"
+    );
+    assert!(
+        loss.iter().filter_map(Value::as_str).any(|line| {
+            line.contains("encoding=\"json\"") && line.contains("name-encoding=\"json\"")
+        }),
+        "no loss line says how the embedding writes a string or a key XML cannot carry: {loss:?}"
     );
 }
 

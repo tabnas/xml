@@ -1065,9 +1065,10 @@ pub fn manifest_text() -> &'static str {
 /// `translate.render` names: a library of alchemy definitions, with no
 /// `export`, whose entry point `xml-render` writes an element tree's
 /// events, the shape this reader builds, as one XML document, and
-/// refuses any other tree. A host links it with its own program. The
-/// crate embeds its own copy, `translate/render.alc`, held to the file
-/// as the manifest's is.
+/// refuses any other tree, and one holding a text, an attribute value
+/// or a name no XML document can hold. A host links it with its own
+/// program. The crate embeds its own copy, `translate/render.alc`, held
+/// to the file as the manifest's is.
 ///
 /// ```
 /// assert!(tabnas_xml::render_text().contains("def xml-render [input]"));

@@ -13,15 +13,24 @@
 ;   its members, in order, is a child element `member` whose attribute
 ;   `name` is the member's key and whose own content is the member's
 ;   value. Every member is a `member` element, whatever its key: a key
-;   may be any string, an element's name may not, and alchemy has no
-;   character test to tell the keys that are XML names from the rest,
-;   so no member is an element named by its key.
+;   may be any string, an element's name may not, and one spelling for
+;   every member keeps the reverse to one rule, so no member is an
+;   element named by its key.
 ; - An array is an element with the attribute `type="array"`. Each of
 ;   its elements, in order, is a child element `item` whose own content
 ;   is the element's value.
 ; - A string is its element's one child, character data. An empty
 ;   string is an element with the attribute `type="string"` and no
 ;   child, so that an element with no `type` always holds text.
+; - A string holding a character XML cannot carry, one outside XML 1.0's
+;   production Char (U+0000 to U+0008, U+000B, U+000C, U+000E to U+001F,
+;   U+FFFE and U+FFFF, which not even a character reference writes), is
+;   its double-quoted JSON form, the text `quoted` makes, whose escapes
+;   leave nothing XML cannot carry, in an element with the attributes
+;   `type="string"` and `encoding="json"`.
+; - A key XML cannot carry is written the same way: the member element's
+;   `name` holds the key's double-quoted JSON form, and its attribute
+;   `name-encoding="json"` says so.
 ; - A number is its character data, in an element with the attribute
 ;   `type="number"`: its lexeme, or the text JSON writes for it when it
 ;   has none, and XML Schema's `INF`, `-INF` or `NaN` for one that is not
@@ -32,46 +41,64 @@
 ;
 ; Every element's members are the reader's, in the reader's order, which
 ; the render holds a tree to: `name`; `localName`, the same name, since
-; no name here has a prefix; `attributes`, an object, `type` first where
-; the value has one and then `name` for a member; and `children`, an
-; array. So `{"item": 1}` is written
+; no name here has a prefix; `attributes`, an object; and `children`, an
+; array. The attributes come in one order: `type` where the value has
+; one, `encoding` where its text is encoded, and then, on a member,
+; `name`, and `name-encoding` where the key is encoded. So `{"item": 1}`
+; is written
 ;
 ;   <document type="object"><member type="number" name="item">1</member></document>
 ;
-; and `[1]` is written
+; `[1]` is written
 ;
 ;   <document type="array"><item type="number">1</item></document>
+;
+; and `{"k\u0000": "v\u0001"}`, a key and a string XML cannot carry, is
+; written
+;
+;   <document type="object"><member type="string" encoding="json" name="&quot;k\u0000&quot;" name-encoding="json">"v\u0001"</member></document>
 ;
 ; The render writes nothing between two elements, neither white space nor
 ; a line break, and a text child as one run of character data, so the
 ; document it writes reads back as the element tree the embedding built.
 ;
-; The reverse reads an element by its `type` attribute and by its
-; parent's. The root element is the root value. Under an element of
+; The reverse reads an element by its attributes and by its parent's
+; `type`. The root element is the root value. Under an element of
 ; `type="object"` each child is a `member` element, whose `name` is the
-; key of the member it holds, and under one of `type="array"` each child
+; key of the member it holds, read with `unquoted` where its
+; `name-encoding` is `json`, and under one of `type="array"` each child
 ; is an `item` element. Of the others, an element with no `type` holds
 ; one text, its string; `type="string"` holds one text or none, the
-; empty string; `type="boolean"` holds `true` or `false`; `type="null"`
-; holds nothing; and `type="number"` holds the number's text. That text
-; reads back as a string: alchemy has no operator that reads a number
-; from its text, so until it has one a number comes back as its text,
-; the one place the reverse falls short of the embedding. The attributes
-; may come in either order, since XML gives them none.
+; empty string, and with `encoding="json"` one text, the string's
+; double-quoted form, read with `unquoted`; `type="boolean"` holds `true`
+; or `false`; `type="null"` holds nothing; and `type="number"` holds the
+; number's text, which reads back as the number it spells, its lexeme
+; kept: `INF`, `-INF` and `NaN` as the numbers that are not finite, and
+; any other text by `number`. The attributes may come in any order, since
+; XML gives them none.
 ;
 ; An element tree that is not an embedding fails with
 ; TARGET_VALUE_UNREPRESENTABLE, naming what was met: a root element not
 ; named `document`; a child of an object's element not named `member`,
 ; or of an array's not named `item`; a `localName` that is not the name;
-; a `type` the embedding never writes; an attribute other than `type`,
-; and `name` on a member; a member without a `name`; text under an
-; object's or an array's element; an element under a scalar's; a second
-; child under a scalar's; a scalar's element without the text its type
-; needs; and a member the reader adds only for what the embedding never
-; writes (`prefix`, `namespace`, `space`, `lang`). A tree that is not an
-; element tree at all fails the same way, in the words the render's
-; refusal uses. Events no tree has fail with PROTOCOL_ORDER_ERROR, in
-; both directions.
+; a `type` the embedding never writes; an `encoding` or a
+; `name-encoding` other than `json`; an `encoding` on an element whose
+; `type` is not `string`; an attribute other than those four, `name` or
+; `name-encoding` on an element that is not a member, and an attribute
+; given twice; a member without a `name`; text under an object's or an
+; array's element; an element under a scalar's; a second child under a
+; scalar's; a scalar's element without the text its type needs; a
+; number's text holding a character no JSON number has; and a member the
+; reader adds only for what the embedding never writes (`prefix`,
+; `namespace`, `space`, `lang`). A tree that is not an element tree at
+; all fails the same way, in the words the render's refusal uses. Two
+; texts fail as the operator that reads them fails, with INPUT_INVALID,
+; since alchemy reads no single character of a string and the reverse
+; can test which characters a text holds but not their order: a number's
+; text of a JSON number's characters that still spells no number (`1-2`),
+; which `number` refuses, and an encoded text or name that is no
+; double-quoted form, which `unquoted` refuses. Events no tree has fail
+; with PROTOCOL_ORDER_ERROR, in both directions.
 ;
 ; Each direction's state is a stack with one marker per open container,
 ; so it grows with a document's nesting and never with its width or its
@@ -79,16 +106,24 @@
 ; container of the plain tree, and, between a member's key and its value,
 ; the key on top, for the member element's `name`. Once the root value
 ; is written the state is `[:done]`, and nothing may follow it. The
-; reverse keeps one marker for each open element, `[phase role type]`:
+; reverse keeps one marker for each open element, `[phase role kind]`:
 ; the phase says what the element has due next, as the render's markers
-; do; the role is `:document`, `:item`, or `:member`, which becomes
-; `:named` once its `name` is read; and the type is the `type` attribute's,
-; as a keyword, or `:none` without one. Once the root element is read the
-; state is `[:done]`.
+; do; the role is `:document`, `:item` or `:member`; and the kind is
+; what the element holds, the `type` attribute's as a keyword
+; (`:encoded` for a string of `encoding="json"`), or `:none` without a
+; type. While the attributes are read the kind is what they have said so
+; far, `[type encoding name name-encoding]`, each `:none` until its
+; attribute is read, and when they end a member's key goes out and the
+; kind is settled. Once the root element is read the state is `[:done]`.
 
 ; ---------------------------------------------------------------------
 ; The embedding
 ; ---------------------------------------------------------------------
+
+; The characters XML 1.0 can carry, its production Char, as code-point
+; ranges: a tab, a line feed, a carriage return, and every character from
+; the space on but the surrogates, U+FFFE and U+FFFF.
+def xml-embed-chars [[9 10] [13 13] [32 55295] [57344 65533] [65536 1114111]]
 
 ; The top of the stack: `:none` before the root value, `:done` after it,
 ; `:object` or `:array` for the open container, or the key of the member
@@ -98,22 +133,36 @@ def xml-embed-top [s]
     case 0 :none
     case _ (top s)
 
-; An element's attributes, after its head's events: `type` first where
-; the value has one, then `name` for a member; `:none` stands for none.
-def xml-embed-attributes [type name head]
-  match [type name]
-    case [:none :none] head
-    case [:none _] (push (scalar name) (push (key "name") head))
-    case [_ :none] (push (scalar type) (push (key "type") head))
-    case _ (push (scalar name) (push (key "name") (push (scalar type) (push (key "type") head))))
+; A member element's name attributes, after the attributes before them:
+; the key in `name`, or, where XML cannot carry it, its double-quoted
+; form there and `name-encoding="json"`; `:none` stands for no member.
+def xml-embed-name [name head]
+  match name
+    case :none head
+    case _
+      if (chars-within xml-embed-chars name)
+        push (scalar name) (push (key "name") head)
+        push (scalar "json")
+          push (key "name-encoding")
+            push (scalar (quoted name)) (push (key "name") head)
+
+; An element's attributes, after its head's events: `type` where the
+; value has one, `encoding` where its text is encoded, and then a
+; member's name; `:none` stands for none.
+def xml-embed-attributes [type encoding name head]
+  xml-embed-name name
+    match [type encoding]
+      case [:none _] head
+      case [_ :none] (push (scalar type) (push (key "type") head))
+      case _ (push (scalar encoding) (push (key "encoding") (push (scalar type) (push (key "type") head))))
 
 ; The events that open an element: its name, its localName, its
 ; attributes, and the start of its children.
-def xml-embed-head [element type name]
+def xml-embed-head [element type encoding name]
   push array-start
     push (key "children")
       push object-end
-        xml-embed-attributes type name
+        xml-embed-attributes type encoding name
           [object-start (key "name") (scalar element) (key "localName") (scalar element)
             (key "attributes") object-start]
 
@@ -121,13 +170,13 @@ def xml-embed-head [element type name]
 ; null.
 def xml-embed-leaf [element type name]
   push object-end
-    push array-end (xml-embed-head element type name)
+    push array-end (xml-embed-head element type :none name)
 
 ; A scalar's whole element when its one child is its text.
-def xml-embed-text [element type name text]
+def xml-embed-text [element type encoding name text]
   push object-end
     push array-end
-      push (scalar text) (xml-embed-head element type name)
+      push (scalar text) (xml-embed-head element type encoding name)
 
 ; A number's text: its lexeme, or the text JSON writes for it, and XML
 ; Schema's spelling of one that is not finite.
@@ -138,25 +187,33 @@ def xml-embed-number [value]
     case :negative-infinity "-INF"
     case :nan "NaN"
 
+; A string's element: its text where XML can carry it, and otherwise its
+; double-quoted form, typed `string` and encoded `json`; the empty
+; string has no child.
+def xml-embed-string [element name value]
+  match value
+    case "" (xml-embed-leaf element "string" name)
+    case _
+      if (chars-within xml-embed-chars value)
+        xml-embed-text element :none :none name value
+        xml-embed-text element "string" "json" name (quoted value)
+
 ; A scalar's element, typed as the embedding types it.
 def xml-embed-scalar [element name value]
   match (kind value)
-    case :string
-      match value
-        case "" (xml-embed-leaf element "string" name)
-        case _ (xml-embed-text element :none name value)
-    case :number (xml-embed-text element "number" name (xml-embed-number value))
-    case :boolean (xml-embed-text element "boolean" name (scalar-text csv-options value))
+    case :string (xml-embed-string element name value)
+    case :number (xml-embed-text element "number" :none name (xml-embed-number value))
+    case :boolean (xml-embed-text element "boolean" :none name (scalar-text csv-options value))
     case :null (xml-embed-leaf element "null" name)
 
 ; A container opens: the root's element, an item's, or the element of
 ; the member whose key is on top, which the container's marker replaces.
 def xml-embed-open [s type marker]
   match (xml-embed-top s)
-    case :none (transition [marker] (xml-embed-head "document" type :none))
-    case :array (transition (push marker s) (xml-embed-head "item" type :none))
+    case :none (transition [marker] (xml-embed-head "document" type :none :none))
+    case :array (transition (push marker s) (xml-embed-head "item" type :none :none))
     case :object (fail :protocol-order "the events hold a value where a key is due, which a tree's never do")
-    case name (transition (push marker (pop s)) (xml-embed-head "member" type name))
+    case name (transition (push marker (pop s)) (xml-embed-head "member" type :none name))
 
 ; A scalar: the root's whole element, after which the tree is done; an
 ; item's; or the element of the member whose key is on top, which comes
@@ -222,6 +279,10 @@ def xml-embed [input]
 ; The reverse
 ; ---------------------------------------------------------------------
 
+; The characters a JSON number's text may hold: `+`, `-`, `.`, the
+; digits, `E` and `e`.
+def xml-unembed-number-chars [[43 43] [45 46] [48 57] [69 69] [101 101]]
+
 ; The top of the stack: `:none` before the root element, `:done` after
 ; it, and otherwise the open element's marker.
 def xml-unembed-top [s]
@@ -248,23 +309,35 @@ def xml-unembed-member [name]
     case "lang" (fail :unrepresentable "the element tree is not an embedding: an element has an xml:lang, which no element of an embedding has")
     case _ (fail :unrepresentable "the tree is not an XML element: it has a member that is not one of name, localName, attributes and children")
 
-; An attribute's name: `type` on any element, and `name` on a member.
-def xml-unembed-attribute [s role t name]
-  match name
-    case "type"
-      match t
-        case :none (transition (xml-unembed-mark [:type role t] s) [])
-        case _ (fail :unrepresentable "the element tree is not an embedding: an element has two types")
-    case "name"
-      match role
-        case :member (transition (xml-unembed-mark [:key role t] s) [])
-        case :named (fail :unrepresentable "the element tree is not an embedding: a member element has two names")
-        case _ (fail :unrepresentable "the element tree is not an embedding: an element that is not a member has a name attribute, which only a member's has")
+; A member's `name` or `name-encoding`, which no other element has: its
+; value is read in the phase named for it.
+def xml-unembed-member-attribute [s role a phase name]
+  match role
+    case :member (transition (xml-unembed-mark [phase role a] s) [])
+    case _
+      fail :unrepresentable
+        string-join ""
+          ["the element tree is not an embedding: an element that is not a member has a " name
+            " attribute, which only a member's has"]
+
+; An attribute's name: `type` and `encoding` on any element, and `name`
+; and `name-encoding` on a member, each once. The kind holds what the
+; attributes have said so far, `[type encoding name name-encoding]`.
+def xml-unembed-attribute [s role a name]
+  match [name a]
+    case ["type" [:none e n ne]] (transition (xml-unembed-mark [:type role a] s) [])
+    case ["type" _] (fail :unrepresentable "the element tree is not an embedding: an element has two types")
+    case ["encoding" [t :none n ne]] (transition (xml-unembed-mark [:encoding role a] s) [])
+    case ["encoding" _] (fail :unrepresentable "the element tree is not an embedding: an element has two encodings")
+    case ["name" [t e :none ne]] (xml-unembed-member-attribute s role a :key name)
+    case ["name" _] (fail :unrepresentable "the element tree is not an embedding: a member element has two names")
+    case ["name-encoding" [t e n :none]] (xml-unembed-member-attribute s role a :key-encoding name)
+    case ["name-encoding" _] (fail :unrepresentable "the element tree is not an embedding: a member element has two name-encodings")
     case _
       fail :unrepresentable
         string-join ""
           ["the element tree is not an embedding: an element has the attribute " (quoted name)
-            ", where the embedding writes type and, on a member, name"]
+            ", where the embedding writes type, encoding and, on a member, name and name-encoding"]
 
 ; A key, in the phase that awaits one: an element's next member, or an
 ; attribute's name.
@@ -282,7 +355,7 @@ def xml-unembed-key [s m name]
       match name
         case "attributes" (transition (xml-unembed-mark [:attributes-start role t] s) [])
         case _ (xml-unembed-member name)
-    case [:attribute-key role t] (xml-unembed-attribute s role t name)
+    case [:attribute-key role a] (xml-unembed-attribute s role a name)
     case [:children-key role t]
       match name
         case "children" (transition (xml-unembed-mark [:children-start role t] s) [])
@@ -323,30 +396,83 @@ def xml-unembed-local [s role t value]
         case :string (fail :unrepresentable (string-join "" ["the element tree is not an embedding: an element's localName is " (quoted value) ", where it is the element's name"]))
         case _ (fail :unrepresentable "the tree is not an XML element: its localName is not a string")
 
-; The `type` attribute's value, one of the six the embedding writes.
-def xml-unembed-type [s role value]
+; The `type` attribute's value, one of the six the embedding writes, kept
+; as its text until the attributes end.
+def xml-unembed-type [value]
   match value
-    case "object" (transition (xml-unembed-mark [:attribute-key role :object] s) [])
-    case "array" (transition (xml-unembed-mark [:attribute-key role :array] s) [])
-    case "string" (transition (xml-unembed-mark [:attribute-key role :string] s) [])
-    case "number" (transition (xml-unembed-mark [:attribute-key role :number] s) [])
-    case "boolean" (transition (xml-unembed-mark [:attribute-key role :boolean] s) [])
-    case "null" (transition (xml-unembed-mark [:attribute-key role :null] s) [])
+    case "object" value
+    case "array" value
+    case "string" value
+    case "number" value
+    case "boolean" value
+    case "null" value
     case _
       match (kind value)
         case :string (fail :unrepresentable (string-join "" ["the element tree is not an embedding: an element's type is " (quoted value) ", where the embedding writes object, array, string, number, boolean or null"]))
         case _ (fail :unrepresentable "the element tree is not an embedding: an element's type is not text")
 
-; A member's `name`, the key of the member it holds, which goes out at
-; once, before the value the element holds.
-def xml-unembed-key-name [s t value]
+; The value of `encoding` or `name-encoding`, which the embedding writes
+; `json`, as `:json`; `what` names the attribute for a failure.
+def xml-unembed-encoding [what value]
+  match value
+    case "json" :json
+    case _
+      match (kind value)
+        case :string (fail :unrepresentable (string-join "" ["the element tree is not an embedding: " what " is " (quoted value) ", where the embedding writes json"]))
+        case _ (fail :unrepresentable (string-join "" ["the element tree is not an embedding: " what " is not text"]))
+
+; A member's `name`, its key or the key's double-quoted form, kept until
+; the attributes end.
+def xml-unembed-name-text [value]
   match (kind value)
-    case :string (transition (xml-unembed-mark [:attribute-key :named t] s) [(key value)])
+    case :string value
     case _ (fail :unrepresentable "the element tree is not an embedding: a member's name is not text")
 
+; An element's kind, settled when its attributes end: its type's keyword,
+; `:encoded` for a string of `encoding="json"`, or `:none` without a
+; type. An encoding on an element of any other type is refused.
+def xml-unembed-kind [t e]
+  match [t e]
+    case ["string" :json] :encoded
+    case [:none :json] (fail :unrepresentable "the element tree is not an embedding: an element has an encoding and no type, where an encoded string's element has the type string")
+    case [_ :json] (fail :unrepresentable (string-join "" ["the element tree is not an embedding: an element of type " t " has an encoding, which only a string's element has"]))
+    case ["object" _] :object
+    case ["array" _] :array
+    case ["string" _] :string
+    case ["number" _] :number
+    case ["boolean" _] :boolean
+    case ["null" _] :null
+    case _ :none
+
+; The attributes' end: a member must have had its name, which goes out
+; now, read with `unquoted` where its `name-encoding` is `json`, and the
+; element's kind is settled.
+def xml-unembed-attributes-end [s role a]
+  match [role a]
+    case [:member [t e :none ne]] (fail :unrepresentable "the element tree is not an embedding: a member element has no name attribute, where it holds its member's key")
+    case [:member [t e n :none]] (transition (xml-unembed-mark [:children-key role (xml-unembed-kind t e)] s) [(key n)])
+    case [:member [t e n ne]] (transition (xml-unembed-mark [:children-key role (xml-unembed-kind t e)] s) [(key (unquoted n))])
+    case [_ [t e n ne]] (transition (xml-unembed-mark [:children-key role (xml-unembed-kind t e)] s) [])
+
+; A number's text, read back as the number it spells, its lexeme kept:
+; XML Schema's `INF`, `-INF` and `NaN` as the numbers that are not
+; finite, and any other text by `number`, once it is known to hold only
+; the characters a JSON number has.
+def xml-unembed-number [value]
+  match value
+    case "INF" (number "Infinity")
+    case "-INF" (number "-Infinity")
+    case "NaN" (number "NaN")
+    case "" (fail :unrepresentable "the element tree is not an embedding: a number's element holds no text, where it holds the number's")
+    case _
+      if (chars-within xml-unembed-number-chars value)
+        number value
+        fail :unrepresentable (string-join "" ["the element tree is not an embedding: a number's element holds " (quoted value) ", which is no number"])
+
 ; A scalar's text: its string where the element has no type or
-; `type="string"`, `true` or `false` where it is a boolean, and a
-; number's text, which comes back as that string (see above).
+; `type="string"`, the string its double-quoted form spells where it is
+; encoded, `true` or `false` where it is a boolean, and the number it
+; spells where it is a number.
 def xml-unembed-scalar-text [s role t value]
   match t
     case :boolean
@@ -354,6 +480,8 @@ def xml-unembed-scalar-text [s role t value]
         case "true" (transition (xml-unembed-mark [:filled role t] s) [(scalar true)])
         case "false" (transition (xml-unembed-mark [:filled role t] s) [(scalar false)])
         case _ (fail :unrepresentable (string-join "" ["the element tree is not an embedding: a boolean's element holds " (quoted value) ", where it holds true or false"]))
+    case :number (transition (xml-unembed-mark [:filled role t] s) [(scalar (xml-unembed-number value))])
+    case :encoded (transition (xml-unembed-mark [:filled role t] s) [(scalar (unquoted value))])
     case _ (transition (xml-unembed-mark [:filled role t] s) [(scalar value)])
 
 ; A child that is text, which only a scalar's element holds.
@@ -372,8 +500,14 @@ def xml-unembed-scalar [s m value]
   match m
     case [:name role t] (xml-unembed-name s role t value)
     case [:local role t] (xml-unembed-local s role t value)
-    case [:type role t] (xml-unembed-type s role value)
-    case [:key role t] (xml-unembed-key-name s t value)
+    case [:type role [t e n ne]]
+      transition (xml-unembed-mark [:attribute-key role [(xml-unembed-type value) e n ne]] s) []
+    case [:encoding role [t e n ne]]
+      transition (xml-unembed-mark [:attribute-key role [t (xml-unembed-encoding "an element's encoding" value) n ne]] s) []
+    case [:key role [t e n ne]]
+      transition (xml-unembed-mark [:attribute-key role [t e (xml-unembed-name-text value) ne]] s) []
+    case [:key-encoding role [t e n ne]]
+      transition (xml-unembed-mark [:attribute-key role [t e n (xml-unembed-encoding "a member's name-encoding" value)]] s) []
     case [:children role t] (xml-unembed-text s role t value)
     case [:filled role t] (fail :unrepresentable "the element tree is not an embedding: a scalar's element has a second child, where it holds one text")
     case [:attributes-start role t] (fail :unrepresentable "the tree is not an XML element: its attributes are not an object")
@@ -387,16 +521,23 @@ def xml-unembed-child [s t]
     case :array (transition (push [:name-key :item :none] s) [])
     case _ (fail :unrepresentable "the element tree is not an embedding: a scalar's element holds an element, where it holds its text")
 
-; An object: the attributes, or a child element.
+; An attribute's value met as a container, where XML has text.
+def xml-unembed-attribute-container []
+  fail :unrepresentable "the tree is not an XML element: an attribute's value is an object or an array, where XML has text"
+
+; An object: the attributes, whose reading starts with none said, or a
+; child element.
 def xml-unembed-object [s m]
   match m
-    case [:attributes-start role t] (transition (xml-unembed-mark [:attribute-key role t] s) [])
+    case [:attributes-start role t] (transition (xml-unembed-mark [:attribute-key role [:none :none :none :none]] s) [])
     case [:children role t] (xml-unembed-child s t)
     case [:filled role t] (fail :unrepresentable "the element tree is not an embedding: a scalar's element has a second child, where it holds one text")
     case [:name role t] (fail :unrepresentable "the tree is not an XML element: its name is not a string")
     case [:local role t] (fail :unrepresentable "the tree is not an XML element: its localName is not a string")
-    case [:type role t] (fail :unrepresentable "the tree is not an XML element: an attribute's value is an object or an array, where XML has text")
-    case [:key role t] (fail :unrepresentable "the tree is not an XML element: an attribute's value is an object or an array, where XML has text")
+    case [:type role t] (xml-unembed-attribute-container)
+    case [:encoding role t] (xml-unembed-attribute-container)
+    case [:key role t] (xml-unembed-attribute-container)
+    case [:key-encoding role t] (xml-unembed-attribute-container)
     case [:children-start role t] (fail :unrepresentable "the tree is not an XML element: its children are not an array")
     case _ (fail :protocol-order "the events hold a value where a key is due, which a tree's never do")
 
@@ -416,16 +557,12 @@ def xml-unembed-array [s m]
     case [:filled role t] (fail :unrepresentable "the tree is not an XML element: a child is an array, where XML has text or an element")
     case [:name role t] (fail :unrepresentable "the tree is not an XML element: its name is not a string")
     case [:local role t] (fail :unrepresentable "the tree is not an XML element: its localName is not a string")
-    case [:type role t] (fail :unrepresentable "the tree is not an XML element: an attribute's value is an object or an array, where XML has text")
-    case [:key role t] (fail :unrepresentable "the tree is not an XML element: an attribute's value is an object or an array, where XML has text")
+    case [:type role t] (xml-unembed-attribute-container)
+    case [:encoding role t] (xml-unembed-attribute-container)
+    case [:key role t] (xml-unembed-attribute-container)
+    case [:key-encoding role t] (xml-unembed-attribute-container)
     case [:attributes-start role t] (fail :unrepresentable "the tree is not an XML element: its attributes are not an object")
     case _ (fail :protocol-order "the events hold a value where a key is due, which a tree's never do")
-
-; The attributes' end: a member must have had its name.
-def xml-unembed-attributes-end [s role t]
-  match role
-    case :member (fail :unrepresentable "the element tree is not an embedding: a member element has no name attribute, where it holds its member's key")
-    case _ (transition (xml-unembed-mark [:children-key role t] s) [])
 
 ; An element's end: its marker comes off, and the root element's is the
 ; tree's end.
@@ -439,7 +576,7 @@ def xml-unembed-close [s]
 def xml-unembed-object-end [s m]
   match m
     case [:end role t] (xml-unembed-close s)
-    case [:attribute-key role t] (xml-unembed-attributes-end s role t)
+    case [:attribute-key role a] (xml-unembed-attributes-end s role a)
     case [:name-key role t] (fail :unrepresentable "the tree is not an XML element: an element is an object whose members are name, localName, attributes and children")
     case [:local-key role t] (fail :unrepresentable "the tree is not an XML element: it has no localName, where an element's members are name, localName, attributes and children")
     case [:attributes-key role t] (fail :unrepresentable "the tree is not an XML element: it has no attributes, where an element's members are name, localName, attributes and children")
@@ -459,6 +596,7 @@ def xml-unembed-children-end [s role t]
     case :null (transition (xml-unembed-mark [:end role t] s) [(scalar null)])
     case :number (fail :unrepresentable "the element tree is not an embedding: a number's element holds no text, where it holds the number's")
     case :boolean (fail :unrepresentable "the element tree is not an embedding: a boolean's element holds no text, where it holds true or false")
+    case :encoded (fail :unrepresentable "the element tree is not an embedding: an encoded string's element holds no text, where it holds the string's double-quoted form")
     case _ (fail :unrepresentable "the element tree is not an embedding: an element with no type holds no text, where it holds its string, and an empty string's has the type string")
 
 ; An array's end: the children's.
