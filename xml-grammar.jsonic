@@ -9,6 +9,30 @@
 #   #XIG - comment / processing instruction / DOCTYPE (ignored)
 #   #TX  - text content between tags (CDATA included)
 #   #ZZ  - end of input
+#
+# The order an element is built in. The parsed value is fixed (the
+# element's members are name, localName, attributes, children, then
+# whichever of prefix, namespace, space and lang it carries), and the
+# rules build it in that same order, in document order, so that a reader
+# of the rule events (tabnas-transduce's incremental source) can stream
+# the tree as the parse proceeds:
+#
+#   element  makes the element in a node of its own when the start tag is
+#            read: a self-closing one complete, one with content holding
+#            the members its start tag gives (name, localName,
+#            attributes). Its close appends what follows children.
+#   head     closes without reading a token, after those members are in
+#            place, and hands the element on to content in the same frame.
+#   content  names the member it builds, `children`, in u.key (the
+#            `@key$` convention) before it pushes the list, and stores the
+#            finished list when the list is done.
+#   children makes the list in a node of its own and pushes the first
+#            child; the children share its node, so the last of them hands
+#            the list back to the rule that made it. (Not `list`, which is
+#            jsonic's rule: embed mode keeps it, pure mode removes it.)
+#   child    one child, text or element, appended to the list; the next
+#            child replaces it (r: child), so siblings are a replace loop
+#            and add no rule depth.
 
 {
   rule: xml: open: [
@@ -17,31 +41,42 @@
     { p: element c: '@no-root-yet' }
   ]
   rule: xml: close: [
-    { s: '#ZZ' g: end }
+    { s: '#ZZ' a: '@xml-end' g: end }
     { s: '#TX' r: xml a: '@doc-text-close' g: comma }
   ]
 
   rule: element: open: [
     { s: '#XSC' a: '@element-selfclose' u: { selfclose: 1 } }
-    { s: '#XOP' p: content a: '@element-open' }
+    { s: '#XOP' p: head a: '@element-open' }
   ]
   rule: element: close: [
     { c: '@element-is-selfclosed' }
     { s: '#XCL' a: '@element-close' g: close }
   ]
 
-  rule: content: open: [
-    { s: '#XCL' b: 1 }
-    { p: child }
-  ]
-  rule: content: close: [
-    { s: '#XCL' b: 1 g: close }
+  rule: head: close: [
     { r: content }
   ]
 
+  rule: content: open: [
+    { p: children u: { key: children } }
+  ]
+  rule: content: close: [
+    { a: '@content-close' }
+  ]
+
+  rule: children: open: [
+    { p: child }
+  ]
+
   rule: child: open: [
+    { s: '#XCL' b: 1 }
     { s: '#TX' a: '@child-text' }
     { s: '#XOP' b: 1 p: element }
     { s: '#XSC' b: 1 p: element }
+  ]
+  rule: child: close: [
+    { s: '#XCL' b: 1 g: close }
+    { r: child }
   ]
 }

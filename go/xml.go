@@ -326,8 +326,94 @@ func Xml(j *tabnas.Tabnas, options map[string]any) error {
 		j.Token("#SP", ""), j.Token("#LN", ""), j.Token("#CM", ""), xigTin,
 	})
 
-	// Grammar declarations. Mirror the TypeScript grammar exactly.
+	// startElement makes an element's node when its start tag is read
+	// (xml-grammar.jsonic in the repository root gives the order the rules
+	// build an element in). A self-closing element is complete here. One
+	// with content holds the members its start tag gives, and keeps the
+	// members that follow "children" in U["fields"] for its own close to
+	// add.
+	//
+	// Namespaces are resolved here too, against the scope the element
+	// inherits. Start tags are read in document order, which is the
+	// pre-order a walk of the finished tree makes, so the elements
+	// resolved, the first violation and the elements left unresolved after
+	// it are the walk's. The scope descends in K (keep props: copied to
+	// every rule pushed or replaced below the element, never up), so an
+	// element whose rule inherits none starts a resolution: the document's
+	// root element, or an XML literal in embed mode. The first violation of
+	// a resolution is kept in ctx.U["xmlNsError"]; @xml-bc fails the
+	// document with it, where the walk used to run, and embed mode ignores
+	// it, as it did.
+	startElement := func(r *tabnas.Rule, ctx *tabnas.Context, selfclose bool) {
+		v := r.O0.Val.(map[string]any)
+		name := v["name"].(string)
+		attrs := applyAttrDefaults(v["attributes"].(*tabnas.OrderedMap), name, ctx)
+		localName := name
+		var fields map[string]any
+		if namespacesOn {
+			scope, inherited := r.K["xmlScope"].(xmlScope)
+			if !inherited {
+				scope = rootScope()
+				ctx.U["xmlNsError"] = ""
+			}
+			if code, _ := ctx.U["xmlNsError"].(string); code == "" {
+				res := resolveElement(name, attrs, scope, strictNamespaces)
+				localName, fields = res.localName, res.fields
+				if res.code != "" {
+					ctx.U["xmlNsError"] = res.code
+				} else {
+					scope = res.scope
+				}
+			}
+			r.EnsureK()["xmlScope"] = scope
+		}
+		el := map[string]any{
+			"name":       name,
+			"localName":  localName,
+			"attributes": attrs,
+		}
+		if selfclose {
+			el["children"] = []any{}
+			for k, v := range fields {
+				el[k] = v
+			}
+		} else {
+			r.EnsureU()["fields"] = fields
+		}
+		r.Node = el
+	}
+
+	// pushBack keeps the list of an element's children current on the
+	// rule that made it (children), which pushed the first child and which
+	// content reads back as r.Child.Node. Every child is pushed by it or
+	// replaces one that was (r: child), and Go's append can move the backing
+	// array, so the child that appends writes the grown list back to its
+	// parent: JavaScript arrays and Rust's shared cell alias by reference,
+	// and a Go slice does not. The engine's NodeCell recognises the
+	// pattern: a rule that writes its grown list back to its parent shares
+	// the parent's cell, so every child's list is the children rule's.
+	pushBack := func(r *tabnas.Rule) {
+		if r.Parent != nil && r.Parent != tabnas.NoRule {
+			r.Parent.Node = r.Node
+		}
+	}
+
+	// State the refs keep, and where:
+	//   ctx.U["rootSeen"]   the document has its root element (@no-root-yet).
+	//   ctx.U["xmlRoot"]    the document's value while the white space
+	//                       after the root element is read (@doc-text-close),
+	//                       until the document's last rule closes (@xml-end).
+	//   ctx.U["xmlNsError"] see startElement.
+	//   K["xmlScope"]       see startElement.
+	//   U["fields"]         see startElement; U is scratch for one rule.
+	//   U["key"]            set on content by the grammar: the member it
+	//                       builds, named before its list opens.
+	//   U["done"]           a text child, which @child-bc must not append.
 	refs := map[tabnas.FuncRef]any{
+		// The root element is done. It is the document's value from here,
+		// on this rule and the start rule, where a plugin layered on this
+		// one (feed) reads it and replaces it with what it makes of the
+		// tree.
 		"@xml-bc": tabnas.StateAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
 			if r.Child == nil || r.Child == tabnas.NoRule || r.Child.Node == nil {
 				return
@@ -344,14 +430,24 @@ func Xml(j *tabnas.Tabnas, options map[string]any) error {
 			// to push a second root element (XML 1.0 §2.1).
 			ctx.U["rootSeen"] = true
 			if namespacesOn {
-				if el, ok := r.Node.(map[string]any); ok {
-					if code := resolveNamespaces(el, nil, strictNamespaces); code != "" {
-						ctx.ParseErr = &tabnas.Token{
-							Name: "#BD", Tin: tabnas.TinBD,
-							Err: code, Why: code, Src: code,
-						}
+				if code, _ := ctx.U["xmlNsError"].(string); code != "" {
+					ctx.ParseErr = &tabnas.Token{
+						Name: "#BD", Tin: tabnas.TinBD,
+						Err: code, Why: code, Src: code,
 					}
 				}
+			}
+		}),
+
+		// The document's last rule closes: a value set aside while the
+		// white space after the root was read is the result again, on this
+		// rule, the final result holder, and on the start rule, as
+		// @xml-bc sets them.
+		"@xml-end": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
+			if value, ok := ctx.U["xmlRoot"]; ok {
+				delete(ctx.U, "xmlRoot")
+				r.Node = value
+				firstRule(r).Node = value
 			}
 		}),
 
@@ -369,32 +465,25 @@ func Xml(j *tabnas.Tabnas, options map[string]any) error {
 			checkDocText(r.O0, ctx)
 		}),
 
+		// White space after the root element. This rule is replaced to
+		// read what follows (r: xml), and the rule replacing it is handed
+		// this rule's node, so the document's value is set aside until the
+		// last rule closes (@xml-end): no rule that starts after the root
+		// element is done is handed the finished document as its node.
 		"@doc-text-close": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
 			checkDocText(r.C0, ctx)
+			if ctx.ParseErr == nil && r.Node != nil && !tabnas.IsUndefined(r.Node) {
+				ctx.U["xmlRoot"] = r.Node
+				r.Node = nil
+			}
 		}),
 
 		"@element-open": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
-			v := r.O0.Val.(map[string]any)
-			name := v["name"].(string)
-			attrs := v["attributes"].(*tabnas.OrderedMap)
-			r.Node = map[string]any{
-				"name":       name,
-				"localName":  name,
-				"attributes": applyAttrDefaults(attrs, name, ctx),
-				"children":   []any{},
-			}
+			startElement(r, ctx, false)
 		}),
 
 		"@element-selfclose": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
-			v := r.O0.Val.(map[string]any)
-			name := v["name"].(string)
-			attrs := v["attributes"].(*tabnas.OrderedMap)
-			r.Node = map[string]any{
-				"name":       name,
-				"localName":  name,
-				"attributes": applyAttrDefaults(attrs, name, ctx),
-				"children":   []any{},
-			}
+			startElement(r, ctx, true)
 		}),
 
 		"@element-close": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
@@ -414,13 +503,37 @@ func Xml(j *tabnas.Tabnas, options map[string]any) error {
 				r.C0.Use["closename"] = closeName
 				r.C0.Err = "xml_mismatched_tag"
 				ctx.ParseErr = r.C0
+				return
+			}
+			// The members after "children".
+			if fields, ok := r.U["fields"].(map[string]any); ok && el != nil {
+				for k, v := range fields {
+					el[k] = v
+				}
 			}
 		}),
 
+		// The list is done: it is the element's "children". r.Child is the
+		// rule that made it, which every child kept current (pushBack).
+		"@content-close": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
+			el, ok := r.Node.(map[string]any)
+			if !ok || r.Child == nil || r.Child == tabnas.NoRule {
+				return
+			}
+			el["children"] = r.Child.Node
+		}),
+
+		// The list of an element's children, in a node of its own: the
+		// first child is pushed with it, and the children after it replace
+		// it and are handed it.
+		"@children-bo": tabnas.StateAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
+			r.Node = make([]any, 0)
+		}),
+
 		"@child-text": tabnas.AltAction(func(r *tabnas.Rule, ctx *tabnas.Context) {
-			el, _ := r.Node.(map[string]any)
-			children, _ := el["children"].([]any)
-			el["children"] = append(children, r.O0.Val)
+			list, _ := r.Node.([]any)
+			r.Node = append(list, r.O0.Val)
+			pushBack(r)
 			r.EnsureU()["done"] = true
 		}),
 
@@ -431,12 +544,12 @@ func Xml(j *tabnas.Tabnas, options map[string]any) error {
 			if r.Child == nil || r.Child == tabnas.NoRule || r.Child.Node == nil {
 				return
 			}
-			el, ok := r.Node.(map[string]any)
+			list, ok := r.Node.([]any)
 			if !ok {
 				return
 			}
-			children, _ := el["children"].([]any)
-			el["children"] = append(children, r.Child.Node)
+			r.Node = append(list, r.Child.Node)
+			pushBack(r)
 		}),
 
 		"@element-is-selfclosed": tabnas.AltCond(func(r *tabnas.Rule, ctx *tabnas.Context) bool {
@@ -445,6 +558,7 @@ func Xml(j *tabnas.Tabnas, options map[string]any) error {
 		}),
 	}
 
+	// Grammar declarations. Mirror the TypeScript grammar exactly.
 	gs := &tabnas.GrammarSpec{
 		Ref: refs,
 		Rule: map[string]*tabnas.GrammarRuleSpec{
@@ -455,35 +569,48 @@ func Xml(j *tabnas.Tabnas, options map[string]any) error {
 					{P: "element", C: "@no-root-yet"},
 				},
 				Close: []*tabnas.GrammarAltSpec{
-					{S: "#ZZ", G: "end"},
+					{S: "#ZZ", A: "@xml-end", G: "end"},
 					{S: "#TX", R: "xml", A: "@doc-text-close", G: "comma"},
 				},
 			},
 			"element": {
 				Open: []*tabnas.GrammarAltSpec{
 					{S: "#XSC", A: "@element-selfclose", U: map[string]any{"selfclose": 1}},
-					{S: "#XOP", P: "content", A: "@element-open"},
+					{S: "#XOP", P: "head", A: "@element-open"},
 				},
 				Close: []*tabnas.GrammarAltSpec{
 					{C: "@element-is-selfclosed"},
 					{S: "#XCL", A: "@element-close", G: "close"},
 				},
 			},
+			"head": {
+				Close: []*tabnas.GrammarAltSpec{
+					{R: "content"},
+				},
+			},
 			"content": {
 				Open: []*tabnas.GrammarAltSpec{
-					{S: "#XCL", B: 1},
-					{P: "child"},
+					{P: "children", U: map[string]any{"key": "children"}},
 				},
 				Close: []*tabnas.GrammarAltSpec{
-					{S: "#XCL", B: 1, G: "close"},
-					{R: "content"},
+					{A: "@content-close"},
+				},
+			},
+			"children": {
+				Open: []*tabnas.GrammarAltSpec{
+					{P: "child"},
 				},
 			},
 			"child": {
 				Open: []*tabnas.GrammarAltSpec{
+					{S: "#XCL", B: 1},
 					{S: "#TX", A: "@child-text"},
 					{S: "#XOP", B: 1, P: "element"},
 					{S: "#XSC", B: 1, P: "element"},
+				},
+				Close: []*tabnas.GrammarAltSpec{
+					{S: "#XCL", B: 1, G: "close"},
+					{R: "child"},
 				},
 			},
 		},
@@ -510,25 +637,14 @@ func Xml(j *tabnas.Tabnas, options map[string]any) error {
 			)
 		})
 
-		// In embed mode the top-level wrapper is Jsonic's `val` rule,
-		// so the @xml-bc hook that copies the root element to
-		// ctx.root().node is not invoked. Resolve namespaces instead
-		// when the element rule closes directly under a val rule.
-		if namespacesOn {
-			j.Rule("element", func(rs *tabnas.RuleSpec, _ *tabnas.Parser) {
-				rs.AddBC(func(r *tabnas.Rule, ctx *tabnas.Context) {
-					if r.Parent != nil && r.Parent != tabnas.NoRule &&
-						r.Parent.Name == "val" {
-						if el, ok := r.Node.(map[string]any); ok {
-							resolveNamespaces(el, nil, strictNamespaces)
-						}
-					}
-				})
-			})
-		}
+		// An XML literal's element is pushed by Jsonic's `val`, so it
+		// inherits no namespace scope and starts a resolution of its own
+		// (see startElement); its first violation is ignored, and the
+		// elements after it are left unresolved, as the walk this
+		// replaced left them.
 	} else {
 		// Pure XML mode: the `xml` start rule reaches only the XML rules
-		// (element/content/child), so Jsonic's inherited JSON value rules
+		// (element/head/content/children/child), so Jsonic's inherited JSON value rules
 		// are unreachable. Remove them so the grammar definition matches
 		// the TypeScript port (Rule(name, nil) deletes the rule).
 		for _, name := range []string{"val", "map", "list", "pair", "elem"} {
@@ -1702,24 +1818,11 @@ const (
 	xmlnsNSURI = "http://www.w3.org/2000/xmlns/"
 )
 
-// resolveNamespaces annotates `element` (and its descendants) with
-// `prefix`, `localName`, `namespace`, `space` and `lang` fields
-// resolved from xmlns / xmlns:* / xml:space / xml:lang attributes
-// in scope. Returns "" on success or an error code on the first
-// reserved-prefix, invalid-namespace-URI or (when `strict`)
-// unbound-prefix violation.
-func resolveNamespaces(
-	element map[string]any, scope map[string]string, strict bool,
-) string {
-	// Pre-bind the reserved xml prefix so xml:space / xml:lang
-	// qualify without an explicit declaration.
-	ns := make(map[string]string, len(scope)+1)
-	for k, v := range scope {
-		ns[k] = v
-	}
-	ns["xml"] = xmlNSURI
-	return resolveScope(
-		element, xmlScope{ns: ns, space: "default", lang: ""}, strict)
+// rootScope is the scope a resolution starts from: the reserved xml
+// prefix pre-bound so xml:space / xml:lang qualify without an explicit
+// declaration.
+func rootScope() xmlScope {
+	return xmlScope{ns: map[string]string{"xml": xmlNSURI}, space: "default", lang: ""}
 }
 
 // invalidNamespaceURI reports whether `uri` contains white space. A
@@ -1739,38 +1842,27 @@ func invalidNamespaceURI(uri string) bool {
 	return false
 }
 
-// resolveScope walks the tree from `root` with a stack of its own rather
-// than by recursion. A goroutine's stack grows, so recursion would not
-// fail as early here as in TypeScript, but it would still grow with the
-// depth of the document, up to the runtime's fatal limit. Children go on
-// in reverse, so they come off in document order: the walk is the
-// pre-order a recursion makes, with the same first error and the same
-// partial annotation.
-func resolveScope(root map[string]any, rootScope xmlScope, strict bool) string {
-	pending := []pendingElement{{root, rootScope}}
-	for len(pending) > 0 {
-		next := pending[len(pending)-1]
-		pending = pending[:len(pending)-1]
-		var err string
-		if pending, err = resolveElement(next.element, next.scope, strict, pending); err != "" {
-			return err
-		}
-	}
-	return ""
+// resolved is what resolving one element gives: its localName; the
+// members it carries after "children" (prefix, namespace, space, lang,
+// each only where it applies); the scope its content inherits; and "" or
+// the code of a violation (reserved-prefix misuse, a namespace name with
+// white space, an unbound prefix when strict). On a violation the result
+// is what resolution leaves on the element it stops at: no members for a
+// bad declaration or attribute, prefix and the local localName for an
+// unbound element prefix.
+type resolved struct {
+	code      string
+	localName string
+	fields    map[string]any
+	scope     xmlScope
 }
 
-// pendingElement is an element still to be resolved, with the scope it
-// inherits.
-type pendingElement struct {
-	element map[string]any
-	scope   xmlScope
-}
-
-// resolveElement resolves one element against the scope it inherits, and
-// queues its element children, last first, with the scope it passes on.
+// resolveElement resolves one element, named `name` and carrying
+// `attrs`, against the scope it inherits, as resolveElement in
+// ts/src/xml.ts does.
 func resolveElement(
-	element map[string]any, scope xmlScope, strict bool, pending []pendingElement,
-) ([]pendingElement, string) {
+	name string, attrs *tabnas.OrderedMap, scope xmlScope, strict bool,
+) resolved {
 	local := xmlScope{
 		ns:    make(map[string]string, len(scope.ns)+4),
 		space: scope.space,
@@ -1779,7 +1871,11 @@ func resolveElement(
 	for k, v := range scope.ns {
 		local.ns[k] = v
 	}
-	if attrs, ok := element["attributes"].(*tabnas.OrderedMap); ok && attrs != nil {
+	fields := map[string]any{}
+	stop := func(code, localName string) resolved {
+		return resolved{code: code, localName: localName, fields: fields, scope: scope}
+	}
+	if attrs != nil {
 		// Pass 1: every namespace declaration on this element, plus
 		// xml:space / xml:lang. Namespaces in XML 1.0 §5.2 scopes a
 		// declaration over the whole element it appears on, *including
@@ -1796,10 +1892,10 @@ func resolveElement(
 			switch {
 			case k == "xmlns":
 				if s == xmlNSURI || s == xmlnsNSURI {
-					return pending, "reserved_namespace"
+					return stop("reserved_namespace", name)
 				}
 				if invalidNamespaceURI(s) {
-					return pending, "invalid_namespace_uri"
+					return stop("invalid_namespace_uri", name)
 				}
 				local.ns[""] = s
 			case strings.HasPrefix(k, "xmlns:"):
@@ -1807,17 +1903,17 @@ func resolveElement(
 				switch prefix {
 				case "xml":
 					if s != xmlNSURI {
-						return pending, "reserved_namespace"
+						return stop("reserved_namespace", name)
 					}
 				case "xmlns":
-					return pending, "reserved_namespace"
+					return stop("reserved_namespace", name)
 				default:
 					if s == xmlNSURI || s == xmlnsNSURI {
-						return pending, "reserved_namespace"
+						return stop("reserved_namespace", name)
 					}
 				}
 				if invalidNamespaceURI(s) {
-					return pending, "invalid_namespace_uri"
+					return stop("invalid_namespace_uri", name)
 				}
 				local.ns[prefix] = s
 			case k == "xml:space":
@@ -1839,47 +1935,37 @@ func resolveElement(
 				}
 				if colon := strings.Index(k, ":"); colon > 0 {
 					if _, ok := local.ns[k[:colon]]; !ok {
-						return pending, "unbound_prefix"
+						return stop("unbound_prefix", name)
 					}
 				}
 			}
 		}
 	}
 
-	name, _ := element["name"].(string)
+	localName := name
 	if idx := strings.Index(name, ":"); idx >= 0 {
 		prefix := name[:idx]
-		element["prefix"] = prefix
-		element["localName"] = name[idx+1:]
+		fields["prefix"] = prefix
+		localName = name[idx+1:]
 		if uri, ok := local.ns[prefix]; ok {
-			element["namespace"] = uri
+			fields["namespace"] = uri
 		} else if strict {
-			return pending, "unbound_prefix"
+			return stop("unbound_prefix", localName)
 		}
 		// Not strict: leave `namespace` unset — the element is named but
 		// unqualified, which is what a namespace-unaware (yet XML 1.0
 		// conformant) consumer sees.
-	} else {
-		element["localName"] = name
-		if uri, ok := local.ns[""]; ok {
-			element["namespace"] = uri
-		}
+	} else if uri, ok := local.ns[""]; ok {
+		fields["namespace"] = uri
 	}
 
 	if local.space != "default" {
-		element["space"] = local.space
+		fields["space"] = local.space
 	}
 	if local.lang != "" {
-		element["lang"] = local.lang
+		fields["lang"] = local.lang
 	}
-
-	children, _ := element["children"].([]any)
-	for i := len(children) - 1; i >= 0; i-- {
-		if ce, ok := children[i].(map[string]any); ok {
-			pending = append(pending, pendingElement{ce, local})
-		}
-	}
-	return pending, ""
+	return resolved{localName: localName, fields: fields, scope: local}
 }
 
 // --- helpers ---

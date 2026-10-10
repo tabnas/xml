@@ -84,7 +84,7 @@ fn the_plugin_layers_on_a_jsonic_instance_and_is_idempotent() {
         r#"{"name":"a","localName":"a","attributes":{},"children":["x"]}"#
     );
     // Rerunning the plugin must not double the alternates: a second root
-    // is still refused, and the rule set is still the four XML rules.
+    // is still refused, and the rule set is still the six XML rules.
     assert!(used.parse("<a/><b/>").is_err());
 }
 
@@ -95,7 +95,10 @@ fn pure_mode_carries_only_the_xml_rules_and_starts_at_xml() {
     let parser = make();
     let mut names = parser.rule_names();
     names.sort();
-    assert_eq!(names, ["child", "content", "element", "xml"]);
+    assert_eq!(
+        names,
+        ["child", "children", "content", "element", "head", "xml"]
+    );
     assert_eq!(parser.config().rule.start, "xml");
     assert!(parser
         .installed_plugins()
@@ -109,17 +112,25 @@ fn pure_mode_carries_only_the_xml_rules_and_starts_at_xml() {
     );
 
     // The push edges the same TypeScript test reads off the debug model:
-    // `xml` pushes `element` and `content` pushes `child`. The engine
-    // carries them on the rule specs, so no debug plugin is needed to see
-    // them. Every fixture exercises the chain, but nothing else names it,
-    // and a grammar edit that reroutes a push while still parsing the
-    // corpus would go unremarked.
-    for (rule, pushed) in [("xml", "element"), ("content", "child")] {
-        let spec = parser
+    // `xml` pushes `element`, `element` pushes `head`, `content` pushes
+    // `children`, and `children` pushes `child`. The engine carries them
+    // on the rule specs, so no debug plugin is needed to see them. Every
+    // fixture exercises the chain, but nothing else names it, and a
+    // grammar edit that reroutes a push while still parsing the corpus
+    // would go unremarked.
+    let spec = |rule: &str| {
+        parser
             .rule_specs()
             .into_iter()
             .find(|spec| spec.name == rule)
-            .unwrap_or_else(|| panic!("the grammar carries a `{rule}` rule"));
+            .unwrap_or_else(|| panic!("the grammar carries a `{rule}` rule"))
+    };
+    for (rule, pushed) in [
+        ("xml", "element"),
+        ("element", "head"),
+        ("content", "children"),
+        ("children", "child"),
+    ] {
         let pushes =
             |alts: &[tabnas::AltSpec]| alts.iter().any(|alt| alt.p.as_deref() == Some(pushed));
         // `open` ALONE, as the TypeScript test this mirrors checks. A
@@ -128,10 +139,25 @@ fn pure_mode_carries_only_the_xml_rules_and_starts_at_xml() {
         // no longer matched the canonical phase -- which is the whole
         // property this case exists to pin.
         assert!(
-            pushes(&spec.open),
+            pushes(&spec(rule).open),
             "`{rule}` does not push `{pushed}` from an OPEN alternative"
         );
     }
+    // And the replace edges, from CLOSE alternatives: `head`, which reads
+    // nothing, hands the element on to `content`, and a `child` hands on
+    // to the next, so siblings are a replace loop and never a push chain.
+    for (rule, replaced) in [("head", "content"), ("child", "child")] {
+        let alts = &spec(rule).close;
+        assert!(
+            alts.iter().any(|alt| alt.r.as_deref() == Some(replaced)),
+            "`{rule}` is not replaced by `{replaced}` from a CLOSE alternative"
+        );
+    }
+    assert!(spec("head").open.is_empty(), "`head` reads nothing");
+    assert!(
+        spec("child").close.iter().all(|alt| alt.p.is_none()),
+        "a `child` never pushes the next"
+    );
 }
 
 #[test]

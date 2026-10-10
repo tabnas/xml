@@ -104,6 +104,7 @@ pub const GRAMMAR_TEXT: &str = r##"
       "close": [
         {
           "s": "#ZZ",
+          "a": "@xml-end",
           "g": "end"
         },
         {
@@ -125,7 +126,7 @@ pub const GRAMMAR_TEXT: &str = r##"
         },
         {
           "s": "#XOP",
-          "p": "content",
+          "p": "head",
           "a": "@element-open"
         }
       ],
@@ -140,29 +141,41 @@ pub const GRAMMAR_TEXT: &str = r##"
         }
       ]
     },
-    "content": {
-      "open": [
-        {
-          "s": "#XCL",
-          "b": 1
-        },
-        {
-          "p": "child"
-        }
-      ],
+    "head": {
       "close": [
-        {
-          "s": "#XCL",
-          "b": 1,
-          "g": "close"
-        },
         {
           "r": "content"
         }
       ]
     },
+    "content": {
+      "open": [
+        {
+          "p": "children",
+          "u": {
+            "key": "children"
+          }
+        }
+      ],
+      "close": [
+        {
+          "a": "@content-close"
+        }
+      ]
+    },
+    "children": {
+      "open": [
+        {
+          "p": "child"
+        }
+      ]
+    },
     "child": {
       "open": [
+        {
+          "s": "#XCL",
+          "b": 1
+        },
         {
           "s": "#TX",
           "a": "@child-text"
@@ -176,6 +189,16 @@ pub const GRAMMAR_TEXT: &str = r##"
           "s": "#XSC",
           "b": 1,
           "p": "element"
+        }
+      ],
+      "close": [
+        {
+          "s": "#XCL",
+          "b": 1,
+          "g": "close"
+        },
+        {
+          "r": "child"
         }
       ]
     }
@@ -231,19 +254,38 @@ fn jsonic_host(parser: &Tabnas) -> bool {
 }
 
 // The function references the grammar names, registered on the instance
-// before the document is installed. The two lifecycle hooks are wired by
+// before the document is installed. The three lifecycle hooks are wired by
 // name to their rule and phase when the rule is installed.
 const XML_BC: &str = "@xml-bc";
+const CHILDREN_BO: &str = "@children-bo";
 const CHILD_BC: &str = "@child-bc";
-const ELEMENT_BC: &str = "@element-bc";
+const XML_END: &str = "@xml-end";
 const NO_ROOT_YET: &str = "@no-root-yet";
 const DOC_TEXT_OPEN: &str = "@doc-text-open";
 const DOC_TEXT_CLOSE: &str = "@doc-text-close";
 const ELEMENT_OPEN: &str = "@element-open";
 const ELEMENT_SELFCLOSE: &str = "@element-selfclose";
 const ELEMENT_CLOSE: &str = "@element-close";
+const CONTENT_CLOSE: &str = "@content-close";
 const CHILD_TEXT: &str = "@child-text";
 const ELEMENT_IS_SELFCLOSED: &str = "@element-is-selfclosed";
+
+// State the references keep, and where. The keys are the canonical
+// plugin's, so a caller inspecting a rule or the context sees what it sees
+// in TypeScript.
+/// `Context::u`: the document's value while the white space after the root
+/// element is read (`@doc-text-close`), until the document's last rule
+/// closes (`@xml-end`).
+const ROOT: &str = "xmlRoot";
+/// `Context::u`: the first namespace violation of the current resolution
+/// (see [`start_element`]).
+const NS_ERROR: &str = "xmlNsError";
+/// A rule's `k` bag (keep props, copied to every rule pushed or replaced
+/// below, never up): the namespace scope an element's content inherits.
+const SCOPE: &str = "xmlScope";
+/// An element rule's `u` (scratch for that one rule): the members an
+/// element with content carries after `children`, which its close appends.
+const FIELDS: &str = "fields";
 
 /// Plugin options. [`Default`] is the canonical default set: namespaces
 /// resolved, entities decoded, no custom entities, undeclared entities an
@@ -526,10 +568,9 @@ fn token_string(token: Option<&Token>) -> Option<String> {
     }
 }
 
-/// The element an open or self-closing tag token describes: `name`,
-/// `localName`, `attributes` (with the DOCTYPE defaults filled in) and an
-/// empty `children` list, in that order.
-fn element_of(token: Option<&Token>, context: &Context) -> Value {
+/// The name and the attributes (with the DOCTYPE defaults filled in) an
+/// open or self-closing tag token carries.
+fn tag_of(token: Option<&Token>, context: &Context) -> (String, IndexMap<String, Value>) {
     let (name, attributes) = match token.map(|token| &token.val) {
         Some(Value::Object(tag)) => {
             let name = match tag.get("name") {
@@ -545,12 +586,80 @@ fn element_of(token: Option<&Token>, context: &Context) -> Value {
         _ => (String::new(), IndexMap::new()),
     };
     let attributes = apply_attr_defaults(attributes, &name, context);
+    (name, attributes)
+}
+
+/// An element's node, made when its start tag is read (`xml-grammar.jsonic`
+/// gives the order the rules build an element in): `name`, `localName`,
+/// `attributes`, then, for a self-closing element, an empty `children` and
+/// the members that follow it. An element with content keeps those members
+/// in its rule's `u` for its close to append after `children`.
+///
+/// Namespaces are resolved here, against the scope the element inherits
+/// (see `namespace`). The scope descends in the rule's `k` bag, so an
+/// element whose rule inherits none starts a resolution: the document's
+/// root element, or an XML literal in embed mode. The first violation of a
+/// resolution is kept in `Context::u`, the elements after it are left
+/// unresolved, and `@xml-bc` fails the document with it, where the walk of
+/// the finished tree used to run; embed mode ignores it, as it did.
+fn start_element(
+    rule: &mut Rule,
+    context: &mut Context,
+    selfclose: bool,
+    namespaces: bool,
+    strict: bool,
+) {
+    let (name, attributes) = tag_of(rule.o0(), context);
+    let mut local_name = name.clone();
+    let mut fields = IndexMap::new();
+    if namespaces {
+        let inherited = rule.k.get(SCOPE).map(namespace::Scope::from_value);
+        if inherited.is_none() {
+            context
+                .u
+                .insert(NS_ERROR.to_string(), Value::String(String::new()));
+        }
+        let stopped =
+            matches!(context.u.get(NS_ERROR), Some(Value::String(code)) if !code.is_empty());
+        let mut scope = None;
+        if !stopped {
+            let resolved = namespace::resolve_element(
+                &name,
+                &attributes,
+                inherited.as_ref().unwrap_or(&namespace::Scope::root()),
+                strict,
+            );
+            local_name = resolved.local_name;
+            fields = resolved.fields;
+            match resolved.code {
+                Some(code) => {
+                    context
+                        .u
+                        .insert(NS_ERROR.to_string(), Value::String(code.to_string()));
+                }
+                None => scope = resolved.scope,
+            }
+        }
+        // A changed scope descends from here; an unchanged one already
+        // came down in `k`. A resolution's first element always records
+        // one, so its content is never taken for another resolution.
+        if scope.is_some() || inherited.is_none() {
+            let scope = scope.unwrap_or_else(namespace::Scope::root);
+            rule.k_mut().insert(SCOPE.to_string(), scope.to_value());
+        }
+    }
     let mut element = IndexMap::new();
-    element.insert("name".to_string(), Value::String(name.clone()));
-    element.insert("localName".to_string(), Value::String(name));
+    element.insert("name".to_string(), Value::String(name));
+    element.insert("localName".to_string(), Value::String(local_name));
     element.insert("attributes".to_string(), Value::object(attributes));
-    element.insert("children".to_string(), Value::array(Vec::new()));
-    Value::object(element)
+    if selfclose {
+        element.insert("children".to_string(), Value::array(Vec::new()));
+        element.extend(fields);
+    } else {
+        rule.u_mut()
+            .insert(FIELDS.to_string(), Value::object(fields));
+    }
+    set_node(rule, Value::object(element));
 }
 
 /// Fill in DOCTYPE-supplied default attribute values (`<!ATTLIST element
@@ -568,17 +677,6 @@ fn apply_attr_defaults(
         }
     }
     attributes
-}
-
-/// Append to the element's `children`.
-fn push_child(node: &mut Value, child: Value) {
-    if let Some(children) = node
-        .as_object_mut()
-        .and_then(|element| element.get_mut("children"))
-        .and_then(Value::as_array_mut)
-    {
-        children.push(child);
-    }
 }
 
 /// XML 1.0 2.1 [1] `document ::= prolog element Misc*`: at document level
@@ -618,7 +716,7 @@ fn check_doc_text(token: Option<&Token>, context: &Context) -> Option<Token> {
 /// In pure mode the parser is reconfigured for XML alone: `xml` becomes
 /// the start rule, the JSON structural tokens and every non-XML lexer are
 /// switched off, and any jsonic value rules are removed, so the parser
-/// carries the four XML rules whether it started as the bare engine (as
+/// carries the six XML rules whether it started as the bare engine (as
 /// [`make`] arranges) or as a jsonic parser. In embed mode, on a jsonic
 /// parser, the jsonic grammar stays and XML elements become values.
 /// Installation is idempotent: an instance that already carries the
@@ -734,7 +832,7 @@ pub fn xml(parser: &mut Tabnas, options: &XmlOptions) -> Result<(), PluginError>
         }
     })?;
 
-    register_refs(parser, namespaces, strict_namespaces, embed);
+    register_refs(parser, namespaces, strict_namespaces);
 
     parser
         .grammar_json(GRAMMAR_TEXT)
@@ -776,36 +874,54 @@ pub fn xml(parser: &mut Tabnas, options: &XmlOptions) -> Result<(), PluginError>
 }
 
 /// Register every function reference the grammar names.
-fn register_refs(parser: &mut Tabnas, namespaces: bool, strict_namespaces: bool, embed: bool) {
-    // The root element lands on the `xml` rule's child; copy it to the
-    // document node, mark the root as seen so `@no-root-yet` refuses a
-    // second one, and resolve namespaces over the finished tree.
+fn register_refs(parser: &mut Tabnas, namespaces: bool, strict_namespaces: bool) {
+    // The root element is done, on the `xml` rule's child: it is the
+    // document's value from here, on the start rule's cell, where a plugin
+    // layered on this one (feed) reads it and replaces it with what it
+    // makes of the tree. Mark the root as seen so `@no-root-yet` refuses a
+    // second one, and fail the document with the first namespace violation
+    // its elements met.
     parser.state_action_with_next_ref(XML_BC, move |rule, context, _next, _out| {
         if rule.child_node.is_undefined() {
             return Ok(None);
         }
-        let mut root = rule.child_node.clone();
+        // The start rule's cell IS the document node, so it is written in
+        // place; `root.node = r.child.node` in the canonical grammar, which
+        // writes it before it reports a namespace violation, as this does.
+        *rule.node.borrow_mut() = rule.child_node.clone();
         context.u.insert("rootSeen".to_string(), Value::Bool(true));
         if namespaces {
-            if let Err(code) = namespace::resolve_namespaces(&mut root, strict_namespaces) {
-                // The canonical writes `ctx.t0.bad(nsErr)` here. Namespace
-                // resolution runs at DOCUMENT CLOSE, where no token is
-                // current, so the canonical's `t0` is the no-token
-                // sentinel, and its report lands at the start of the
-                // source (row 1, column 1). Marking the same sentinel
-                // keeps the failure inside the engine's error machinery,
-                // which is what renders the template registered for
-                // `code`. An `ActionError` here would bypass that and
-                // hand the caller a literal stand-in message instead.
-                let mut token = context.t0().cloned().unwrap_or_else(Token::no_token);
-                token.bad(code);
-                return Ok(Some(token));
+            if let Some(Value::String(code)) = context.u.get(NS_ERROR) {
+                if !code.is_empty() {
+                    // The canonical writes `ctx.t0.bad(nsErr)` here. The
+                    // root is done at DOCUMENT CLOSE, where no token is
+                    // current, so the canonical's `t0` is the no-token
+                    // sentinel, and its report lands at the start of the
+                    // source (row 1, column 1). Marking the same sentinel
+                    // keeps the failure inside the engine's error
+                    // machinery, which is what renders the template
+                    // registered for `code`. An `ActionError` here would
+                    // bypass that and hand the caller a literal stand-in
+                    // message instead.
+                    let code = code.clone();
+                    let mut token = context.t0().cloned().unwrap_or_else(Token::no_token);
+                    token.bad(&code);
+                    return Ok(Some(token));
+                }
             }
         }
-        // The start rule's cell IS the document node, so it is written
-        // in place; `root.node = r.child.node` in the canonical grammar.
-        *rule.node.borrow_mut() = root;
         Ok(None)
+    });
+
+    // The document's last rule closes: a value set aside while the white
+    // space after the root was read is the result again. The start rule's
+    // cell IS the document node, shared by the rules that replace the start
+    // rule, so it is written in place.
+    parser.action_with_context(XML_END, |rule, context| {
+        if let Some(value) = context.u.shift_remove(ROOT) {
+            *rule.node.borrow_mut() = value;
+        }
+        Ok(())
     });
 
     // Only let `xml` push an `element` while the document has produced
@@ -817,18 +933,28 @@ fn register_refs(parser: &mut Tabnas, namespaces: bool, strict_namespaces: bool,
     parser.action_with_match_ref(DOC_TEXT_OPEN, |rule, context, _matched| {
         Ok(check_doc_text(rule.o0(), context))
     });
+    // White space after the root element. This rule is replaced to read
+    // what follows (`r: xml`), and the rule replacing it shares this
+    // rule's cell, so the document's value is set aside until the last
+    // rule closes (`@xml-end`): no rule that starts after the root element
+    // is done is handed the finished document as its node.
     parser.action_with_match_ref(DOC_TEXT_CLOSE, |rule, context, _matched| {
-        Ok(check_doc_text(rule.c0(), context))
+        if let Some(bad) = check_doc_text(rule.c0(), context) {
+            return Ok(Some(bad));
+        }
+        let value = std::mem::replace(&mut *rule.node.borrow_mut(), Value::Undefined);
+        if !value.is_undefined() {
+            context.u.insert(ROOT.to_string(), value);
+        }
+        Ok(None)
     });
 
-    parser.action_with_context(ELEMENT_OPEN, |rule, context| {
-        let element = element_of(rule.o0(), context);
-        set_node(rule, element);
+    parser.action_with_context(ELEMENT_OPEN, move |rule, context| {
+        start_element(rule, context, false, namespaces, strict_namespaces);
         Ok(())
     });
-    parser.action_with_context(ELEMENT_SELFCLOSE, |rule, context| {
-        let element = element_of(rule.o0(), context);
-        set_node(rule, element);
+    parser.action_with_context(ELEMENT_SELFCLOSE, move |rule, context| {
+        start_element(rule, context, true, namespaces, strict_namespaces);
         Ok(())
     });
 
@@ -836,6 +962,7 @@ fn register_refs(parser: &mut Tabnas, namespaces: bool, strict_namespaces: bool,
     // itself is marked (not the lookahead token) so the caret lands on
     // `</b>`, and the two names ride on the token as details, which is
     // where the `{openname}` / `{closename}` placeholders resolve from.
+    // Then the members that follow `children` are appended, in order.
     parser.action_with_match_ref(ELEMENT_CLOSE, |rule, _context, _matched| {
         let open_name = match &*rule.node.borrow() {
             Value::Object(element) => match element.get("name") {
@@ -846,6 +973,13 @@ fn register_refs(parser: &mut Tabnas, namespaces: bool, strict_namespaces: bool,
         };
         let close_name = token_string(rule.c0()).unwrap_or_default();
         if open_name == close_name {
+            if let Some(Value::Object(fields)) = rule.u.get(FIELDS).cloned() {
+                if let Some(element) = rule.node.borrow_mut().as_object_mut() {
+                    for (key, value) in fields.iter() {
+                        element.insert(key.clone(), value.clone());
+                    }
+                }
+            }
             return Ok(None);
         }
         let Some(mut token) = rule.c0().cloned() else {
@@ -861,11 +995,35 @@ fn register_refs(parser: &mut Tabnas, namespaces: bool, strict_namespaces: bool,
         Ok(Some(token))
     });
 
+    // The list is done: it is the element's `children`.
+    parser.action_with_context(CONTENT_CLOSE, |rule, _context| {
+        let children = rule.child_node.clone();
+        if let Some(element) = rule.node.borrow_mut().as_object_mut() {
+            element.insert("children".to_string(), children);
+        }
+        Ok(())
+    });
+
+    // The list of an element's children, in a cell of its own. The first
+    // child is pushed with it and shares it, and so do the children that
+    // replace the first, so the last of them hands the list back to this
+    // rule, whose cell it is, and the rule above it, `content`, takes a
+    // handle on the list only when this rule closes. Until then the list
+    // has one owner, so a reader of the rule events that empties it in
+    // place as it streams (tabnas-transduce's pruning) empties the list
+    // the element stores, not a copy.
+    parser.state_action_ref(CHILDREN_BO, |rule, _context| {
+        set_node(rule, Value::array(Vec::new()));
+        Ok(())
+    });
+
     parser.action_with_context(CHILD_TEXT, |rule, _context| {
         let text = rule
             .o0()
             .map_or(Value::Undefined, |token| token.val.clone());
-        push_child(&mut rule.node.borrow_mut(), text);
+        if let Some(list) = rule.node.borrow_mut().as_array_mut() {
+            list.push(text);
+        }
         rule.u_mut().insert("done".to_string(), Value::Bool(true));
         Ok(())
     });
@@ -875,7 +1033,9 @@ fn register_refs(parser: &mut Tabnas, namespaces: bool, strict_namespaces: bool,
             return Ok(());
         }
         let child = rule.child_node.clone();
-        push_child(&mut rule.node.borrow_mut(), child);
+        if let Some(list) = rule.node.borrow_mut().as_array_mut() {
+            list.push(child);
+        }
         Ok(())
     });
 
@@ -883,29 +1043,6 @@ fn register_refs(parser: &mut Tabnas, namespaces: bool, strict_namespaces: bool,
         ELEMENT_IS_SELFCLOSED,
         |rule, _context| matches!(rule.u.get("selfclose"), Some(Value::Number(n)) if *n == 1.0),
     );
-
-    // In embed mode the top-level wrapper is jsonic's `val` rule, so the
-    // `@xml-bc` hook that resolves namespaces over the document never
-    // runs. Resolve them instead when an element closes directly under a
-    // `val`, once its whole subtree is in place.
-    if embed && namespaces {
-        parser.state_action_ref(ELEMENT_BC, move |rule, _context| {
-            let under_val = rule
-                .parent_rule
-                .as_ref()
-                .is_some_and(|parent| parent.name.as_str() == "val");
-            if !under_val || !matches!(&*rule.node.borrow(), Value::Object(_)) {
-                return Ok(());
-            }
-            let mut element = rule.node.borrow().clone();
-            // The outcome is deliberately not an error here, as in the
-            // canonical plugin: a fragment inside a jsonic document is
-            // annotated as far as it can be.
-            let _ = namespace::resolve_namespaces(&mut element, strict_namespaces);
-            *rule.node.borrow_mut() = element;
-            Ok(())
-        });
-    }
 }
 
 /// The plugin form of [`xml`], for [`Tabnas::use_plugin`]. Options are

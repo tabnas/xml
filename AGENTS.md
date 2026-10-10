@@ -76,12 +76,79 @@ maintainer's ruling of 2026-10-06); only embed mode does, on an engine
 the caller has already given jsonic (`use(jsonic)` first, then
 `use(Xml, { embed: true })`). The plugin contributes
 XML tokens (`#XOP` open tag, `#XCL` close tag, `#XSC` self-close, `#XIG`
-ignored markup, `#TX` text/CDATA) and a four-rule grammar chain
-(`xml` → `element` → `content` → `child`); `xml` is the start rule.
+ignored markup, `#TX` text/CDATA) and a six-rule grammar chain
+(`xml` → `element` → `head`, which `content` replaces → `children` →
+`child`); `xml` is the start rule.
 
 A parsed element is `{ name, prefix?, localName, namespace?, space?,
 lang?, attributes, children }` where `children` is a mixed array of text
-strings and nested elements.
+strings and nested elements. TypeScript and Rust keep the members in the
+order the rules add them: `name`, `localName`, `attributes`, `children`,
+then whichever of `prefix`, `namespace`, `space` and `lang` apply; Go
+declares that order in `xmlElementFields`.
+
+### The order the rules build an element in
+
+**The rules build the value in document order, member by member, each
+container in a node of its own, so the rule events can be streamed.**
+tabnas-transduce's incremental source follows a parse through its rule
+events and streams the tree as the parse proceeds, and its differential
+suite lists a grammar only when every fixture streams exactly as the
+finished value walks. `xml-grammar.jsonic` sets the order out in its
+header, and each runtime keeps it:
+
+- `element` makes the element's node when the start tag is read: a
+  self-closing one complete, one with content holding `name`,
+  `localName` and `attributes`, with the members that follow `children`
+  kept in the rule's `u.fields` for its close to append.
+- `head` reads no token. Its close comes after those members are in
+  place, and it replaces itself with `content` in the same frame.
+- `content` names the member it builds in `u.key` (`children`, the
+  `@key$` convention) before it pushes the list, and stores the finished
+  list in its close.
+- `children` makes the list in a node of its own (`@children-bo`) and
+  pushes the first child. The children share its node, so the list the
+  last child appends to is the one `content` stores, the same container,
+  even when a reader of the rule events empties it in place as it
+  streams (transduce prunes what it has streamed, to keep its memory
+  flat). When `content` pushed the children itself, the Rust engine
+  handed `content` the list as the last child closed, before a reader saw
+  that close, so emptying the list in place copied it, and the element
+  stored the copy. (The rule is not called `list`, which is jsonic's:
+  embed mode keeps that rule, and pure mode removes it.)
+- `child` is one child. Each appends what it read, a text at its open
+  (`@child-text`), an element at its close (`@child-bc`), and the next
+  replaces it (`r: child`), so siblings are a replace loop: rule depth
+  over 10,000 siblings is what one sibling needs, 8, and the build-order
+  tests pin it. A level of nesting costs four rules (`element`; `head`,
+  then `content`; `children`; `child`) where it cost three; the lexer's
+  limit of 256 open elements keeps rule depth within 1,024.
+- The root element is the document's value from `@xml-bc` on, on the
+  start rule, where a plugin layered on this one (feed) reads it. White
+  space after the root replaces the start rule to read it (`r: xml`), and
+  `@doc-text-close` sets the root aside in `ctx.u.xmlRoot`, so the rule
+  that replaces the start rule does not open holding the finished tree,
+  which a reader of the rule events would take for a second root;
+  `@xml-end` puts it back when the document's last rule closes.
+
+**Namespaces are resolved as each start tag is read**, against the scope
+the element inherits in its rule's `k` bag (keep props descend to every
+rule pushed or replaced below, never up). Start tags arrive in document
+order, the pre-order a walk of the finished tree makes, so the elements
+resolved, the first violation and the elements left unresolved after it
+are what the walk this replaced gave, in both modes. The first violation
+of a resolution is kept in `ctx.u.xmlNsError`; in pure mode `@xml-bc`
+fails the document with it once the root element is done, where the
+walk ran, so the code, the position and which error wins over a
+well-formedness one are unchanged. An element whose rule inherits no
+scope starts a resolution: the root element, or an XML literal in embed
+mode, where violations stay ignored.
+
+A change to any of this must keep the value exactly as it is, in every
+runtime. `ts/test/build-order.test.ts`, `go/build_order_test.go` and
+`rs/tests/build_order_test.rs` pin the rule-pass sequence of a small
+document, the rule depth over 10,000 siblings, and values with their
+member order, embed mode's partial resolution included.
 
 **`attributes` keeps source order in every port.** The attributes come in
 the order the tag writes them, then the `<!ATTLIST>` defaults the tag
@@ -101,7 +168,7 @@ ranging over one starts at a random place, so two things varied from run
 to run: feed's Go port wrote XHTML content with its attributes in a
 different order on different runs (7 of the 4,106 inputs under feed's
 `test/` differed between runs of one build), and when one element broke
-two namespace rules, `resolveNamespaces` reported either code
+two namespace rules, namespace resolution reported either code
 (`errors.tsv` rows `ns-first-offence-*` now pin the first one, in source
 order, in all three runtimes). A Go caller that type-asserts
 `el["attributes"].(map[string]any)` must take `*tabnas.OrderedMap`
@@ -371,7 +438,7 @@ so the parser — and the generated railroad diagram — carry only the rules
 XML actually uses. On the bare engine (what the docs show, what Rust's
 `make` and the Go C library build) there is nothing to delete and the
 loop is a no-op; on a jsonic engine (what the test suites build) it
-removes jsonic's five, so both end with the same four rules:
+removes jsonic's five, so both end with the same six rules:
 
 ```ts
 // ts/src/xml.ts
@@ -402,9 +469,15 @@ token names shown in `ts/doc/grammar.svg`.
   built sibling to override) and **fails loudly** when it cannot be
   resolved; it used to skip, which turned a broken dependency graph into
   a green tick. It asserts the rule set
-  (`child`/`content`/`element`/`xml`), `m.config.start === 'xml'` (note
-  `config.start`, not `m.start`), that `Xml` is in `m.plugins`, and the
-  push edges (`xml` pushes `element`, `content` pushes `child`).
+  (`child`/`children`/`content`/`element`/`head`/`xml`),
+  `m.config.start === 'xml'` (note `config.start`, not `m.start`), that
+  `Xml` is in `m.plugins`, and the edges (`xml` pushes `element`,
+  `element` pushes `head`, `head` is replaced by `content`, `content`
+  pushes `children`, `children` pushes `child`, and a `child` is replaced
+  by the next, never pushes it).
+- `ts/test/build-order.test.ts` — the order the rules build an element
+  in (see "The order the rules build an element in"), mirrored by
+  `go/build_order_test.go` and `rs/tests/build_order_test.rs`.
 - `ts/test/doc-examples.test.ts` — extracts ` ```js ` blocks containing
   `// =>` from the READMEs/docs and checks each assertion (the standard
   tabnas doc-example harness). It understands both the trailing form

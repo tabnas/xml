@@ -20,7 +20,7 @@ The payoff is reuse: error reporting, source-location tracking, the
 railroad-diagram tooling, and the option/derivation system all come from
 the engine for free. The XML grammar is just data and rules fed to it.
 
-## Two stages: a custom lexer, then four rules
+## Two stages: a custom lexer, then six rules
 
 A parse runs in the engine's two cooperating stages.
 
@@ -46,13 +46,19 @@ depth so that while inside an open element it claims the whole text run up
 to the next `<` as a single `#TX` token, keeping JSON-syntax characters
 like `,` and `:` from being reinterpreted, which matters in embed mode.
 
-The **parser** then consumes those tokens with four small rules:
+The **parser** then consumes those tokens with six small rules:
 
 - `xml`. The document: optional leading text, then one `element`,
   gated so a *second* root cannot start.
 - `element`: `#XOP … #XCL` or `#XSC`; builds the element node.
-- `content`. Loops over children until the matching `#XCL`.
-- `child`. One child: `#TX` text, or a nested `element`.
+- `head`. Reads nothing: it closes once the members the start tag gives
+  are in place, and hands the element on to `content`.
+- `content`. Builds the `children` member, and names it before the list
+  starts.
+- `children`. The list of children, in a node of its own.
+- `child`. One child: `#TX` text, or a nested `element`. The next child
+  replaces it, so a run of siblings loops in place rather than nesting
+  rule inside rule.
 
 Each rule has open/close phases and short alternates with at most two
 tokens of lookahead, the engine's deterministic, no-backtracking model.
@@ -96,18 +102,35 @@ the `element` rule, building an XML subtree wherever a value was
 expected. This makes XML a first-class value type inside relaxed-JSON
 documents.
 
-## Namespaces, space, and lang as a post-pass
+## The rules build the value in document order
 
-Lexing and the four rules build the raw element tree with names and
-attributes verbatim. Namespace resolution is a separate single walk over
-the finished tree (run by the `@xml-bc` hook in pure mode, or an
-`element` close hook in embed mode). That walk threads three pieces of
-inherited scope down the tree: the prefix→URI bindings, the active
-`xml:space`, and the active `xml:lang`. It pre-binds the reserved `xml`
-prefix, rejects reserved-prefix/URI misuse and unbound prefixes, and
+The rules build each element in the order its value lists the members:
+`name`, `localName`, and `attributes` when the parser reads the start
+tag, then `children` one child at a time, then whichever of `prefix`,
+`namespace`, `space`, and `lang` apply. Every element and every list of
+children gets a node of its own when it starts. So the rule events of a
+parse show the tree in the order a writer would emit it, and a streaming
+consumer can follow a document as the parser reads it, without waiting
+for the whole value.
+
+## Namespaces, space, and lang, resolved at each start tag
+
+The parser resolves the names of an element when it reads the start tag,
+against a scope the element inherits from its parent: the prefix→URI
+bindings, the active `xml:space`, and the active `xml:lang`. The scope
+starts with the reserved `xml` prefix bound, and the declarations on an
+element apply to the element itself and everything inside it.
+Resolution rejects reserved-prefix/URI misuse and unbound prefixes, and
 records `prefix` / `namespace` / `space` / `lang` on elements, but only
-where they actually apply, so plain documents stay clean. Turning
-`namespaces` off simply skips this pass.
+where they actually apply, so plain documents stay clean.
+
+Start tags arrive in document order, so the first violation resolution
+meets is the first in the document. In pure mode it fails the parse once
+the root element is complete, and a document that breaks a
+well-formedness rule fails for that reason first. In embed mode the
+parser resolves each XML literal on its own, a violation fails nothing,
+and the elements after the first violation stay unresolved. Turning
+`namespaces` off skips resolution.
 
 ## Design choices and their edges
 
