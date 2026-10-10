@@ -1,13 +1,20 @@
 /* Copyright (c) 2021-2026 Richard Rodger and other contributors, MIT License */
 
 //! Namespace resolution (Namespaces in XML 1.0) and the inherited
-//! `xml:space` / `xml:lang` values (XML 1.0 2.10 and 2.12), walked over
-//! the finished element tree exactly as `resolveNamespaces` in
-//! `ts/src/xml.ts` walks it.
+//! `xml:space` / `xml:lang` values (XML 1.0 2.10 and 2.12), resolved
+//! element by element as start tags are read, exactly as `resolveElement`
+//! in `ts/src/xml.ts` resolves them.
+//!
+//! Start tags are read in document order, which is the pre-order a walk
+//! of the finished tree makes, so resolving each element as it starts
+//! reaches the elements, the first violation and the elements left
+//! unresolved after it that the walk of the finished tree did. The scope
+//! an element's content inherits travels down the parse in the element
+//! rule's `k` bag, as the value [`Scope::to_value`] writes.
 
 use std::collections::HashMap;
-use std::rc::Rc;
 
+use indexmap::IndexMap;
 use tabnas::Value;
 
 /// The `xml` prefix is bound to this URI and may be used implicitly.
@@ -18,10 +25,70 @@ pub(crate) const XMLNS_NS_URI: &str = "http://www.w3.org/2000/xmlns/";
 /// State inherited down the tree: prefix to namespace name (the empty
 /// prefix is the default namespace), the active `xml:space`, and the
 /// active `xml:lang`.
-struct Scope {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Scope {
     ns: HashMap<String, String>,
     space: String,
     lang: String,
+}
+
+impl Scope {
+    /// The scope a resolution starts from: the `xml` prefix pre-bound to
+    /// its reserved URI, so `xml:lang` and `xml:space` qualify without an
+    /// explicit declaration.
+    pub(crate) fn root() -> Scope {
+        let mut ns = HashMap::new();
+        ns.insert("xml".to_string(), XML_NS_URI.to_string());
+        Scope {
+            ns,
+            space: "default".to_string(),
+            lang: String::new(),
+        }
+    }
+
+    /// The scope as a value, for a rule's `k` bag: an object of `ns`,
+    /// `space` and `lang`.
+    pub(crate) fn to_value(&self) -> Value {
+        let ns = self
+            .ns
+            .iter()
+            .map(|(prefix, uri)| (prefix.clone(), Value::String(uri.clone())))
+            .collect::<IndexMap<_, _>>();
+        let mut scope = IndexMap::new();
+        scope.insert("ns".to_string(), Value::object(ns));
+        scope.insert("space".to_string(), Value::String(self.space.clone()));
+        scope.insert("lang".to_string(), Value::String(self.lang.clone()));
+        Value::object(scope)
+    }
+
+    /// The scope [`Scope::to_value`] wrote.
+    pub(crate) fn from_value(value: &Value) -> Scope {
+        let text = |field: &str| match value {
+            Value::Object(scope) => match scope.get(field) {
+                Some(Value::String(text)) => text.clone(),
+                _ => String::new(),
+            },
+            _ => String::new(),
+        };
+        let ns = match value {
+            Value::Object(scope) => match scope.get("ns") {
+                Some(Value::Object(ns)) => ns
+                    .iter()
+                    .filter_map(|(prefix, uri)| match uri {
+                        Value::String(uri) => Some((prefix.clone(), uri.clone())),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => HashMap::new(),
+            },
+            _ => HashMap::new(),
+        };
+        Scope {
+            ns,
+            space: text("space"),
+            lang: text("lang"),
+        }
+    }
 }
 
 /// A namespace name is a URI reference (RFC 3986), and a URI reference
@@ -33,21 +100,6 @@ fn invalid_namespace_uri(uri: &str) -> bool {
         .any(|byte| matches!(byte, b' ' | b'\t' | b'\n' | b'\r'))
 }
 
-/// Annotate `element` and its descendants with `prefix`, `localName`,
-/// `namespace`, `space` and `lang`. `Err` carries the code of the first
-/// reserved-prefix, invalid-namespace-name or (when `strict`)
-/// unbound-prefix violation; the tree may then be partly annotated.
-pub(crate) fn resolve_namespaces(element: &mut Value, strict: bool) -> Result<(), &'static str> {
-    let mut ns = HashMap::new();
-    ns.insert("xml".to_string(), XML_NS_URI.to_string());
-    let scope = Scope {
-        ns,
-        space: "default".to_string(),
-        lang: String::new(),
-    };
-    resolve_scope(element, scope, strict)
-}
-
 fn attribute_text(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
@@ -55,285 +107,243 @@ fn attribute_text(value: &Value) -> String {
     }
 }
 
-/// Walk the tree from `root` with a stack of its own rather than by
-/// recursion: a document nested some thousands of elements deep would
-/// otherwise overflow the thread's stack, which ends the process where no
-/// error can be caught. Children go on in reverse, so they come off in
-/// document order: the walk is the pre-order a recursion makes, with the
-/// same first error and the same partial annotation.
-fn resolve_scope(root: &mut Value, scope: Scope, strict: bool) -> Result<(), &'static str> {
-    let mut pending = vec![(root, Rc::new(scope))];
-    while let Some((element, scope)) = pending.pop() {
-        resolve_element(element, &scope, strict, &mut pending)?;
-    }
-    Ok(())
+/// What resolving one element gives.
+#[derive(Debug, PartialEq)]
+pub(crate) struct Resolved {
+    /// `None`, or the code of the violation the element commits:
+    /// reserved-prefix misuse, a namespace name with white space, or
+    /// (when strict) an unbound prefix.
+    pub(crate) code: Option<&'static str>,
+    /// The element's `localName`.
+    pub(crate) local_name: String,
+    /// The members the element carries after `children`, in their order:
+    /// `prefix`, `namespace`, `space` and `lang`, each only where it
+    /// applies. On a violation, what resolution leaves on the element it
+    /// stops at: nothing for a bad declaration or attribute, `prefix` for
+    /// an unbound element prefix.
+    pub(crate) fields: IndexMap<String, Value>,
+    /// The scope the element's content inherits, when the element's own
+    /// attributes declare anything; `None` when it inherits the element's
+    /// scope unchanged, and on a violation.
+    pub(crate) scope: Option<Scope>,
 }
 
-/// The elements still to resolve, each with the scope it inherits.
-type Pending<'a> = Vec<(&'a mut Value, Rc<Scope>)>;
-
-/// Resolve one element against the scope it inherits, and queue its
-/// element children, last first, with the scope it passes on.
-fn resolve_element<'a>(
-    element: &'a mut Value,
+/// Resolve one element, named `name` and carrying `attributes`, against
+/// the scope it inherits.
+pub(crate) fn resolve_element(
+    name: &str,
+    attributes: &IndexMap<String, Value>,
     scope: &Scope,
     strict: bool,
-    pending: &mut Pending<'a>,
-) -> Result<(), &'static str> {
-    let Some(map) = element.as_object_mut() else {
-        return Ok(());
+) -> Resolved {
+    let stop = |code, local_name: &str, fields| Resolved {
+        code: Some(code),
+        local_name: local_name.to_string(),
+        fields,
+        scope: None,
     };
-    let mut ns = scope.ns.clone();
+    let mut ns: Option<HashMap<String, String>> = None;
     let mut space = scope.space.clone();
     let mut lang = scope.lang.clone();
+    let mut declared = false;
 
-    if let Some(Value::Object(attrs)) = map.get("attributes") {
-        // Pass 1: every namespace declaration on this element, plus
-        // xml:space / xml:lang. Namespaces in XML 1.0 5.2 scopes a
-        // declaration over the whole element it appears on, INCLUDING
-        // that element's own other attributes, so every declaration must
-        // be in hand before any prefixed name is resolved.
-        for (key, value) in attrs.iter() {
-            let text = attribute_text(value);
-            if key == "xmlns" {
-                if text == XML_NS_URI || text == XMLNS_NS_URI {
-                    return Err("reserved_namespace");
-                }
-                if invalid_namespace_uri(&text) {
-                    return Err("invalid_namespace_uri");
-                }
-                ns.insert(String::new(), text);
-            } else if let Some(prefix) = key.strip_prefix("xmlns:") {
-                match prefix {
-                    "xml" => {
-                        if text != XML_NS_URI {
-                            return Err("reserved_namespace");
-                        }
-                    }
-                    "xmlns" => return Err("reserved_namespace"),
-                    _ => {
-                        if text == XML_NS_URI || text == XMLNS_NS_URI {
-                            return Err("reserved_namespace");
-                        }
-                    }
-                }
-                if invalid_namespace_uri(&text) {
-                    return Err("invalid_namespace_uri");
-                }
-                ns.insert(prefix.to_string(), text);
-            } else if key == "xml:space" {
-                space = text;
-            } else if key == "xml:lang" {
-                lang = text;
+    // Pass 1: every namespace declaration on this element, plus xml:space
+    // / xml:lang. Namespaces in XML 1.0 5.2 scopes a declaration over the
+    // whole element it appears on, INCLUDING that element's own other
+    // attributes, so every declaration must be in hand before any
+    // prefixed name is resolved.
+    for (key, value) in attributes {
+        let text = attribute_text(value);
+        if key == "xmlns" {
+            if text == XML_NS_URI || text == XMLNS_NS_URI {
+                return stop("reserved_namespace", name, IndexMap::new());
             }
-        }
-
-        // Pass 2: prefixed attribute names against the completed in-scope
-        // declarations. A namespace constraint only: an unbound prefix on
-        // an attribute leaves the document XML 1.0 well-formed.
-        if strict {
-            for key in attrs.keys() {
-                if key == "xmlns" || key.starts_with("xmlns:") {
-                    continue;
-                }
-                if let Some((prefix, _)) = key.split_once(':') {
-                    if !prefix.is_empty() && !ns.contains_key(prefix) {
-                        return Err("unbound_prefix");
+            if invalid_namespace_uri(&text) {
+                return stop("invalid_namespace_uri", name, IndexMap::new());
+            }
+            ns.get_or_insert_with(|| scope.ns.clone())
+                .insert(String::new(), text);
+            declared = true;
+        } else if let Some(prefix) = key.strip_prefix("xmlns:") {
+            match prefix {
+                "xml" => {
+                    if text != XML_NS_URI {
+                        return stop("reserved_namespace", name, IndexMap::new());
                     }
+                }
+                "xmlns" => return stop("reserved_namespace", name, IndexMap::new()),
+                _ => {
+                    if text == XML_NS_URI || text == XMLNS_NS_URI {
+                        return stop("reserved_namespace", name, IndexMap::new());
+                    }
+                }
+            }
+            if invalid_namespace_uri(&text) {
+                return stop("invalid_namespace_uri", name, IndexMap::new());
+            }
+            ns.get_or_insert_with(|| scope.ns.clone())
+                .insert(prefix.to_string(), text);
+            declared = true;
+        } else if key == "xml:space" {
+            space = text;
+            declared = true;
+        } else if key == "xml:lang" {
+            lang = text;
+            declared = true;
+        }
+    }
+    let bound = ns.as_ref().unwrap_or(&scope.ns);
+
+    // Pass 2: prefixed attribute names against the completed in-scope
+    // declarations. A namespace constraint only: an unbound prefix on an
+    // attribute leaves the document XML 1.0 well-formed.
+    if strict {
+        for key in attributes.keys() {
+            if key == "xmlns" || key.starts_with("xmlns:") {
+                continue;
+            }
+            if let Some((prefix, _)) = key.split_once(':') {
+                if !prefix.is_empty() && !bound.contains_key(prefix) {
+                    return stop("unbound_prefix", name, IndexMap::new());
                 }
             }
         }
     }
 
-    let name = match map.get("name") {
-        Some(Value::String(name)) => name.clone(),
-        _ => String::new(),
-    };
-    if let Some((prefix, local)) = name.split_once(':') {
-        map.insert("prefix".to_string(), Value::String(prefix.to_string()));
-        map.insert("localName".to_string(), Value::String(local.to_string()));
-        if let Some(uri) = ns.get(prefix) {
-            map.insert("namespace".to_string(), Value::String(uri.clone()));
+    let mut fields = IndexMap::new();
+    let local_name = if let Some((prefix, local)) = name.split_once(':') {
+        fields.insert("prefix".to_string(), Value::String(prefix.to_string()));
+        if let Some(uri) = bound.get(prefix) {
+            fields.insert("namespace".to_string(), Value::String(uri.clone()));
         } else if strict {
-            return Err("unbound_prefix");
+            return stop("unbound_prefix", local, fields);
         }
         // Not strict: `namespace` stays unset. The element is named but
         // unqualified, which is what a namespace-unaware (yet XML 1.0
         // conformant) consumer sees.
+        local.to_string()
     } else {
-        map.insert("localName".to_string(), Value::String(name));
-        if let Some(uri) = ns.get("").filter(|uri| !uri.is_empty()) {
-            map.insert("namespace".to_string(), Value::String(uri.clone()));
+        if let Some(uri) = bound.get("").filter(|uri| !uri.is_empty()) {
+            fields.insert("namespace".to_string(), Value::String(uri.clone()));
         }
-    }
+        name.to_string()
+    };
 
     if space != "default" {
-        map.insert("space".to_string(), Value::String(space.clone()));
+        fields.insert("space".to_string(), Value::String(space.clone()));
     }
     if !lang.is_empty() {
-        map.insert("lang".to_string(), Value::String(lang.clone()));
+        fields.insert("lang".to_string(), Value::String(lang.clone()));
     }
 
-    let child_scope = Rc::new(Scope { ns, space, lang });
-    if let Some(children) = map.get_mut("children").and_then(Value::as_array_mut) {
-        for child in children.iter_mut().rev() {
-            if matches!(child, Value::Object(_)) {
-                pending.push((child, Rc::clone(&child_scope)));
-            }
-        }
+    let scope = declared.then(|| Scope {
+        ns: ns.unwrap_or_else(|| scope.ns.clone()),
+        space,
+        lang,
+    });
+    Resolved {
+        code: None,
+        local_name,
+        fields,
+        scope,
     }
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use indexmap::IndexMap;
 
-    fn element(name: &str, attrs: &[(&str, &str)], children: Vec<Value>) -> Value {
-        let mut map = IndexMap::new();
-        map.insert("name".to_string(), Value::String(name.to_string()));
-        map.insert("localName".to_string(), Value::String(name.to_string()));
-        let attrs: IndexMap<String, Value> = attrs
+    fn attrs(pairs: &[(&str, &str)]) -> IndexMap<String, Value> {
+        pairs
             .iter()
             .map(|(key, value)| ((*key).to_string(), Value::String((*value).to_string())))
-            .collect();
-        map.insert("attributes".to_string(), Value::object(attrs));
-        map.insert("children".to_string(), Value::array(children));
-        Value::object(map)
+            .collect()
     }
 
-    fn field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
-        match value {
-            Value::Object(map) => map.get(key),
+    fn text(fields: &IndexMap<String, Value>, key: &str) -> Option<String> {
+        match fields.get(key) {
+            Some(Value::String(text)) => Some(text.clone()),
             _ => None,
         }
     }
 
-    /// A tree `depth` elements deep, built from the inside out: the
-    /// innermost element is `innermost`, and `xmlns:p` is declared on the
-    /// outermost.
-    fn deep(depth: usize, innermost: &str) -> Value {
-        let mut tree = element(innermost, &[], vec![]);
-        for level in 1..depth {
-            let declared: &[(&str, &str)] = if level + 1 == depth {
-                &[("xmlns:p", "urn:p")]
-            } else {
-                &[]
-            };
-            tree = element("p:a", declared, vec![tree]);
-        }
-        tree
-    }
-
-    /// The innermost element, reached a level at a time.
-    fn innermost(tree: &Value) -> &Value {
-        let mut here = tree;
-        while let Some(Value::Array(children)) = field(here, "children") {
-            match children.first() {
-                Some(child) => here = child,
-                None => break,
-            }
-        }
-        here
-    }
-
-    /// Take a tree apart a level at a time: a value drops by recursion, and
-    /// one this deep would overflow the stack doing it.
-    fn dismantle(tree: Value) {
-        let mut pending = vec![tree];
-        while let Some(mut value) = pending.pop() {
-            let children = value
-                .as_object_mut()
-                .and_then(|map| map.get_mut("children"))
-                .and_then(Value::as_array_mut);
-            if let Some(children) = children {
-                pending.append(children);
-            }
-        }
-    }
-
     #[test]
-    fn a_deep_tree_is_walked_without_the_call_stack() {
-        // The walk used to recurse once per level, which ended the process
-        // with a stack overflow some thousands of levels deep (tabnas/xml#68).
-        // It keeps a stack of its own now, so 20,000 levels resolve on a
-        // thread with 256 KiB of stack, where each level used to take a
-        // frame. The tree is built, walked and taken apart on that thread.
-        let walk = |innermost_name: &'static str| {
-            std::thread::Builder::new()
-                .stack_size(256 << 10)
-                .spawn(move || {
-                    let mut tree = deep(20_000, innermost_name);
-                    let outcome = resolve_namespaces(&mut tree, true);
-                    let deepest = innermost(&tree);
-                    let found = ["namespace", "localName"].map(|key| match field(deepest, key) {
-                        Some(Value::String(text)) => Some(text.clone()),
-                        _ => None,
-                    });
-                    dismantle(tree);
-                    (outcome, found)
-                })
-                .expect("spawns")
-                .join()
-                .expect("walked without overflowing the stack")
-        };
-        let (outcome, [namespace, local_name]) = walk("p:z");
-        assert_eq!(outcome, Ok(()));
-        assert_eq!(namespace.as_deref(), Some("urn:p"));
-        assert_eq!(local_name.as_deref(), Some("z"));
-        // The first error is still the one a pre-order walk meets first:
-        // here, the innermost element's unbound prefix.
-        let (outcome, _) = walk("q:z");
-        assert_eq!(outcome, Err("unbound_prefix"));
-    }
-
-    #[test]
-    fn a_declaration_scopes_over_the_element_and_its_children() {
-        let mut root = element(
+    fn a_declaration_scopes_over_the_element_and_its_content() {
+        let root = Scope::root();
+        let a = resolve_element(
             "p:a",
-            &[("xmlns:p", "urn:p"), ("p:x", "1")],
-            vec![element("p:b", &[], vec![]), Value::String("t".into())],
+            &attrs(&[("p:x", "1"), ("xmlns:p", "urn:p")]),
+            &root,
+            true,
         );
-        assert_eq!(resolve_namespaces(&mut root, true), Ok(()));
-        assert_eq!(field(&root, "prefix"), Some(&Value::String("p".into())));
+        assert_eq!(a.code, None);
+        assert_eq!(a.local_name, "a");
         assert_eq!(
-            field(&root, "namespace"),
-            Some(&Value::String("urn:p".into()))
+            a.fields.keys().collect::<Vec<_>>(),
+            ["prefix", "namespace"],
+            "in their order"
         );
-        let Some(Value::Array(children)) = field(&root, "children") else {
-            panic!("children")
-        };
-        assert_eq!(
-            field(&children[0], "namespace"),
-            Some(&Value::String("urn:p".into()))
+        assert_eq!(text(&a.fields, "namespace").as_deref(), Some("urn:p"));
+        let inner = a.scope.expect("a declaration changes the scope");
+        let b = resolve_element("p:b", &attrs(&[]), &inner, true);
+        assert_eq!(text(&b.fields, "namespace").as_deref(), Some("urn:p"));
+        assert_eq!(b.scope, None, "no declaration: the scope passes on");
+        // The scope survives the round trip a rule's `k` bag makes.
+        assert_eq!(Scope::from_value(&inner.to_value()), inner);
+    }
+
+    #[test]
+    fn space_and_lang_are_inherited_and_written_only_when_not_the_default() {
+        let root = Scope::root();
+        let a = resolve_element(
+            "a",
+            &attrs(&[("xml:space", "preserve"), ("xml:lang", "en")]),
+            &root,
+            false,
         );
+        assert_eq!(a.fields.keys().collect::<Vec<_>>(), ["space", "lang"]);
+        let b = resolve_element("b", &attrs(&[]), a.scope.as_ref().unwrap(), false);
+        assert_eq!(text(&b.fields, "space").as_deref(), Some("preserve"));
+        assert_eq!(text(&b.fields, "lang").as_deref(), Some("en"));
+        let plain = resolve_element("c", &attrs(&[]), &root, false);
+        assert!(plain.fields.is_empty());
+        // The xml prefix is bound from the start.
+        let x = resolve_element("xml:c", &attrs(&[]), &root, true);
+        assert_eq!(text(&x.fields, "namespace").as_deref(), Some(XML_NS_URI));
     }
 
     #[test]
     fn unbound_prefixes_are_an_error_only_when_strict() {
-        let mut lenient = element("q:c", &[], vec![]);
-        assert_eq!(resolve_namespaces(&mut lenient, false), Ok(()));
-        assert_eq!(
-            field(&lenient, "localName"),
-            Some(&Value::String("c".into()))
-        );
-        assert_eq!(field(&lenient, "namespace"), None);
-        let mut strict = element("q:c", &[], vec![]);
-        assert_eq!(resolve_namespaces(&mut strict, true), Err("unbound_prefix"));
+        let root = Scope::root();
+        let lenient = resolve_element("q:c", &attrs(&[]), &root, false);
+        assert_eq!(lenient.code, None);
+        assert_eq!(lenient.local_name, "c");
+        assert_eq!(text(&lenient.fields, "namespace"), None);
+        // Strict: the element keeps the prefix and its local name, and
+        // nothing after them.
+        let strict = resolve_element("q:c", &attrs(&[("xml:lang", "en")]), &root, true);
+        assert_eq!(strict.code, Some("unbound_prefix"));
+        assert_eq!(strict.local_name, "c");
+        assert_eq!(strict.fields.keys().collect::<Vec<_>>(), ["prefix"]);
+        // An unbound attribute prefix stops before the element's names.
+        let attribute = resolve_element("q:c", &attrs(&[("z:k", "v")]), &root, true);
+        assert_eq!(attribute.code, Some("unbound_prefix"));
+        assert_eq!(attribute.local_name, "q:c");
+        assert!(attribute.fields.is_empty());
     }
 
     #[test]
     fn reserved_prefixes_and_spaces_in_names_are_rejected() {
-        let mut root = element("a", &[("xmlns:xmlns", "urn:x")], vec![]);
-        assert_eq!(
-            resolve_namespaces(&mut root, false),
-            Err("reserved_namespace")
-        );
-        let mut root = element("a", &[("xmlns", "urn:x y")], vec![]);
-        assert_eq!(
-            resolve_namespaces(&mut root, false),
-            Err("invalid_namespace_uri")
-        );
+        let root = Scope::root();
+        let reserved = resolve_element("a", &attrs(&[("xmlns:xmlns", "urn:x")]), &root, false);
+        assert_eq!(reserved.code, Some("reserved_namespace"));
+        assert_eq!(reserved.local_name, "a");
+        assert!(reserved.fields.is_empty());
+        let spaced = resolve_element("a", &attrs(&[("xmlns", "urn:x y")]), &root, false);
+        assert_eq!(spaced.code, Some("invalid_namespace_uri"));
+        // The default namespace undeclared with xmlns="" names nothing.
+        let undeclared = resolve_element("a", &attrs(&[("xmlns", "")]), &root, false);
+        assert_eq!(undeclared.code, None);
+        assert_eq!(text(&undeclared.fields, "namespace"), None);
     }
 }

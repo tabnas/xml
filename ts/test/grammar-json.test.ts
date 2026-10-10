@@ -88,7 +88,9 @@ describe('embedded grammar', () => {
     assert.deepStrictEqual(Object.keys(seen[0].rule), [
       'xml',
       'element',
+      'head',
       'content',
+      'children',
       'child',
     ])
   })

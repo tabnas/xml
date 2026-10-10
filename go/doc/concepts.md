@@ -16,7 +16,7 @@ rules, and option-driven reconfiguration) rather than hand-writing a
 parser. Error reporting, source-location tracking, and the option system
 all come from the engine.
 
-## Two stages: a custom lexer, then four rules
+## Two stages: a custom lexer, then six rules
 
 A parse runs in the engine's two cooperating stages.
 
@@ -40,10 +40,12 @@ in comments, `<` in attribute values, malformed `&` references). It
 tracks XML nesting depth so that while inside an open element it claims
 the whole run up to the next `<` as a single `#TX` token.
 
-The **parser** then consumes those tokens with four rules (`xml`,
-`element`, `content`, `child`) each with open/close phases and short
-alternates with at most two tokens of lookahead. The grammar is small
-enough to read in one screen; it lives in the repository's top-level
+The **parser** then consumes those tokens with six rules (`xml`,
+`element`, `head`, `content`, `children`, `child`) each with open/close
+phases and short alternates with at most two tokens of lookahead. The
+next `child` replaces the one before it, so a run of siblings loops in
+place rather than nesting rule inside rule. The grammar is small enough
+to read in one screen; it lives in the repository's top-level
 `xml-grammar.jsonic` (authored once, in relaxed-JSON) and is mirrored
 here as a `tabnas.GrammarSpec`. The `@`-prefixed function references in
 the grammar are resolved at plugin time against Go callbacks that build
@@ -68,16 +70,36 @@ jsonic's grammar intact and adds an XML literal as an alternate of the
 for a value and sees `#XOP`/`#XSC`, it backtracks one token and pushes
 the `element` rule, building an XML subtree wherever a value was expected.
 
-## Namespaces, space, and lang as a post-pass
+## The rules build the value in document order
 
-Lexing and the four rules build the raw tree verbatim. Namespace
-resolution is a separate single walk over the finished tree (the
-`@xml-bc` hook in pure mode, or an `element` close hook in embed mode).
-It threads three pieces of inherited scope down the tree (the
-prefix→URI bindings, the active `xml:space`, the active `xml:lang`),
-pre-binds the reserved `xml` prefix, rejects reserved-prefix/URI misuse
-and unbound prefixes, and records `prefix` / `namespace` / `space` /
-`lang` only where they apply. Turning `namespaces` off skips this pass.
+The rules build each element in the order its value lists the members:
+`name`, `localName`, and `attributes` when the parser reads the start
+tag, then `children` one child at a time, then whichever of `prefix`,
+`namespace`, `space`, and `lang` apply. Every element and every list of
+children gets a node of its own when it starts. So the rule events of a
+parse show the tree in the order a writer would emit it, and a streaming
+consumer can follow a document as the parser reads it, without waiting
+for the whole value.
+A Go map keeps no order of its own, so the plugin declares that order
+for each parse in `ctx.Meta["fields"]`.
+
+## Namespaces, space, and lang, resolved at each start tag
+
+The parser resolves the names of an element when it reads the start tag,
+against a scope the element inherits from its parent (the prefix→URI
+bindings, the active `xml:space`, the active `xml:lang`). The scope
+starts with the reserved `xml` prefix bound, and the declarations on an
+element apply to the element itself and everything inside it.
+Resolution rejects reserved-prefix/URI misuse and unbound prefixes, and
+records `prefix` / `namespace` / `space` / `lang` only where they apply.
+
+Start tags arrive in document order, so the first violation resolution
+meets is the first in the document. In pure mode it fails the parse once
+the root element is complete, and a document that breaks a
+well-formedness rule fails for that reason first. In embed mode the
+parser resolves each XML literal on its own, a violation fails nothing,
+and the elements after the first violation stay unresolved. Turning
+`namespaces` off skips resolution.
 
 ## Design choices and their edges
 

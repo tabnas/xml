@@ -107,6 +107,7 @@ const grammarJson = `
       "close": [
         {
           "s": "#ZZ",
+          "a": "@xml-end",
           "g": "end"
         },
         {
@@ -128,7 +129,7 @@ const grammarJson = `
         },
         {
           "s": "#XOP",
-          "p": "content",
+          "p": "head",
           "a": "@element-open"
         }
       ],
@@ -143,29 +144,41 @@ const grammarJson = `
         }
       ]
     },
-    "content": {
-      "open": [
-        {
-          "s": "#XCL",
-          "b": 1
-        },
-        {
-          "p": "child"
-        }
-      ],
+    "head": {
       "close": [
-        {
-          "s": "#XCL",
-          "b": 1,
-          "g": "close"
-        },
         {
           "r": "content"
         }
       ]
     },
+    "content": {
+      "open": [
+        {
+          "p": "children",
+          "u": {
+            "key": "children"
+          }
+        }
+      ],
+      "close": [
+        {
+          "a": "@content-close"
+        }
+      ]
+    },
+    "children": {
+      "open": [
+        {
+          "p": "child"
+        }
+      ]
+    },
     "child": {
       "open": [
+        {
+          "s": "#XCL",
+          "b": 1
+        },
         {
           "s": "#TX",
           "a": "@child-text"
@@ -179,6 +192,16 @@ const grammarJson = `
           "s": "#XSC",
           "b": 1,
           "p": "element"
+        }
+      ],
+      "close": [
+        {
+          "s": "#XCL",
+          "b": 1,
+          "g": "close"
+        },
+        {
+          "r": "child"
         }
       ]
     }
@@ -411,21 +434,94 @@ Expected </{openname}> but found </{closename}>.`,
     },
   })
 
+  // An element's node, made when its start tag is read (xml-grammar.jsonic
+  // gives the order the rules build an element in). A self-closing element
+  // is complete here. One with content holds the members its start tag
+  // gives, and keeps the members that follow `children` in `u.fields` for
+  // its own close to append.
+  //
+  // Namespaces are resolved here too, against the scope the element
+  // inherits. Start tags are read in document order, which is the
+  // pre-order a walk of the finished tree makes, so the elements resolved,
+  // the first violation and the elements left unresolved after it are
+  // the walk's. The scope descends in `k` (keep props: copied to every rule
+  // pushed or replaced below the element, never up), so an element whose
+  // rule inherits none starts a resolution: the document's root element,
+  // or an XML literal in embed mode. The first violation of a resolution
+  // is kept in `ctx.u.xmlNsError`; @xml-bc fails the document with it,
+  // where the walk used to run, and embed mode ignores it, as it did.
+  function startElement(r: Rule, ctx: Context, selfclose: boolean) {
+    const v = r.o0.val
+    const name: string = v.name
+    const attributes = applyAttrDefaults(v.attributes, name, ctx)
+    let localName = name
+    let fields: Record<string, string> = {}
+    if (options.namespaces !== false) {
+      let scope: XmlScope | undefined = r.k.xmlScope
+      if (undefined === scope) {
+        scope = ROOT_SCOPE
+        ctx.u.xmlNsError = ''
+      }
+      if (!ctx.u.xmlNsError) {
+        const resolved = resolveElement(name, attributes, scope, strictNamespaces)
+        localName = resolved.localName
+        fields = resolved.fields
+        if (resolved.code) {
+          ctx.u.xmlNsError = resolved.code
+        } else {
+          scope = resolved.scope
+        }
+      }
+      r.k.xmlScope = scope
+    }
+    if (selfclose) {
+      r.node = { name, localName, attributes, children: [], ...fields }
+    } else {
+      r.node = { name, localName, attributes }
+      r.u.fields = fields
+    }
+  }
+
+  // State the refs keep, and where:
+  //   ctx.u.rootSeen   - the document has its root element (@no-root-yet).
+  //   ctx.u.xmlRoot    - the document's value while the white space after
+  //                      the root element is read (@doc-text-close), until
+  //                      the document's last rule closes (@xml-end).
+  //   ctx.u.xmlNsError - see startElement.
+  //   k.xmlScope       - see startElement.
+  //   u.fields         - see startElement; `u` is scratch for one rule.
+  //   u.key            - set on `content` by the grammar: the member it
+  //                      builds, named before its list opens.
+  //   u.done           - a text child, which @child-bc must not append.
   const refs: Record<string, Function> = {
+    // The root element is done. It is the document's value from here, on
+    // the start rule, where a plugin layered on this one (feed) reads it
+    // and replaces it with what it makes of the tree, and on this rule,
+    // which is the start rule or the one that replaced it to read the text
+    // before the root.
     '@xml-bc': (r: Rule, ctx: Context) => {
       if (r.child && r.child.node) {
         const root = ctx.root()
         root.node = r.child.node
+        r.node = r.child.node
         // Mark the document as having seen its root so the
         // `@no-root-yet` condition gates any further attempts to
         // push a second root element.
         ctx.u.rootSeen = true
-        if (options.namespaces !== false) {
-          const nsErr = resolveNamespaces(root.node, {}, strictNamespaces)
-          if (nsErr) {
-            return ctx.t0.bad(nsErr)
-          }
+        if (options.namespaces !== false && ctx.u.xmlNsError) {
+          return ctx.t0.bad(ctx.u.xmlNsError)
         }
+      }
+    },
+
+    // The document's last rule closes: its value is the result, on the
+    // start rule (`ctx.root()`, which the engine reads) and on this rule,
+    // which is the start rule or one replacing it.
+    '@xml-end': (r: Rule, ctx: Context) => {
+      const value = undefined !== ctx.u.xmlRoot ? ctx.u.xmlRoot : ctx.root().node
+      if (undefined !== value) {
+        r.node = value
+        ctx.root().node = value
       }
     },
 
@@ -437,27 +533,27 @@ Expected </{openname}> but found </{closename}>.`,
     // root element only Misc (comments, PIs, whitespace) may appear, so
     // character data before or after the root is not well-formed.
     '@doc-text-open': (r: Rule, ctx: Context) => checkDocText(r.o0, ctx),
-    '@doc-text-close': (r: Rule, ctx: Context) => checkDocText(r.c0, ctx),
 
-    '@element-open': (r: Rule, ctx: Context) => {
-      const v = r.o0.val
-      r.node = {
-        name: v.name,
-        localName: v.name,
-        attributes: applyAttrDefaults(v.attributes, v.name, ctx),
-        children: [],
+    // White space after the root element. This rule is replaced to read
+    // what follows (r: xml), and the rule replacing it is handed this
+    // rule's node, so the document's value, which the start rule holds, is
+    // set aside until the last rule closes (@xml-end): no rule that starts
+    // after the root element is done is handed the finished document as
+    // its node.
+    '@doc-text-close': (r: Rule, ctx: Context) => {
+      const bad = checkDocText(r.c0, ctx)
+      if (bad) return bad
+      const root = ctx.root()
+      if (undefined !== root.node) {
+        ctx.u.xmlRoot = root.node
+        root.node = undefined
+        r.node = undefined
       }
     },
 
-    '@element-selfclose': (r: Rule, ctx: Context) => {
-      const v = r.o0.val
-      r.node = {
-        name: v.name,
-        localName: v.name,
-        attributes: applyAttrDefaults(v.attributes, v.name, ctx),
-        children: [],
-      }
-    },
+    '@element-open': (r: Rule, ctx: Context) => startElement(r, ctx, false),
+
+    '@element-selfclose': (r: Rule, ctx: Context) => startElement(r, ctx, true),
 
     '@element-close': (r: Rule, _ctx: Context) => {
       const openName = r.node && r.node.name
@@ -473,16 +569,30 @@ Expected </{openname}> but found </{closename}>.`,
           closename: closeName,
         })
       }
+      // The members after `children`, in their order.
+      Object.assign(r.node, r.u.fields)
+    },
+
+    // The list is done: it is the element's `children`.
+    '@content-close': (r: Rule) => {
+      r.node.children = r.child.node
+    },
+
+    // The list of an element's children, in a node of its own: the first
+    // child is pushed with it, and the children after it replace it and
+    // are handed it.
+    '@children-bo': (r: Rule) => {
+      r.node = []
     },
 
     '@child-text': (r: Rule) => {
-      r.node.children.push(r.o0.val)
+      r.node.push(r.o0.val)
       r.u.done = true
     },
 
     '@child-bc': (r: Rule) => {
       if (true !== r.u.done && r.child && r.child.node) {
-        r.node.children.push(r.child.node)
+        r.node.push(r.child.node)
       }
     },
 
@@ -513,23 +623,14 @@ Expected </{openname}> but found </{closename}>.`,
       )
     })
 
-    // In embed mode the top-level wrapper is Jsonic's `val` rule, so
-    // the `@xml-bc` hook that copies the root element to `ctx.root().node`
-    // is not invoked. Resolve namespaces after the full tree lands on
-    // the element rule by hooking its close-state action.
-    if (options.namespaces !== false) {
-      tn.rule('element', (rs: RuleSpec) => {
-        rs.bc((r: Rule) => {
-          if (r.node && 'object' === typeof r.node && r.parent &&
-              r.parent.name === 'val') {
-            resolveNamespaces(r.node, {}, strictNamespaces)
-          }
-        })
-      })
-    }
+    // An XML literal's element is pushed by Jsonic's `val`, so it
+    // inherits no namespace scope and starts a resolution of its own
+    // (see startElement); its first violation is ignored, and the
+    // elements after it are left unresolved, as the walk this replaced
+    // left them.
   } else {
     // Pure XML mode: the `xml` start rule reaches only the XML rules
-    // (element/content/child), so Jsonic's JSON value rules are now dead.
+    // (element/head/content/children/child), so Jsonic's JSON value rules are now dead.
     // Remove them from the grammar definition so the parser — and the
     // generated railroad diagram — carries only the rules XML actually uses.
     for (const name of ['val', 'map', 'list', 'pair', 'elem']) {
@@ -1645,8 +1746,8 @@ function checkEntityRefs(
 }
 
 
-// Resolve namespaces on an element tree. Walks the tree once,
-// maintaining four kinds of inherited state:
+// Namespace resolution, element by element as start tags are read (see
+// startElement), carrying four kinds of inherited state:
 //
 //   ns      - prefix → namespace URI (empty key = default ns), per
 //             XML Namespaces 1.0
@@ -1668,19 +1769,14 @@ const XML_NS_URI = 'http://www.w3.org/XML/1998/namespace'
 // The xmlns prefix is reserved and must never be declared.
 const XMLNS_NS_URI = 'http://www.w3.org/2000/xmlns/'
 
-function resolveNamespaces(
-  element: XmlElement,
-  scope: Record<string, string>,
-  strict?: boolean,
-): string {
-  // Pre-bind the xml prefix to its reserved URI so xml:lang / xml:space
-  // qualify correctly without an explicit declaration.
-  return resolveScope(element, {
-    ns: { ...scope, xml: XML_NS_URI },
-    space: 'default',
-    lang: '',
-  }, true === strict)
-}
+// The scope a resolution starts from: the xml prefix pre-bound to its
+// reserved URI so xml:lang / xml:space qualify without an explicit
+// declaration. Read only; resolveElement copies what it inherits.
+const ROOT_SCOPE: XmlScope = Object.freeze({
+  ns: Object.freeze({ xml: XML_NS_URI }),
+  space: 'default',
+  lang: '',
+}) as XmlScope
 
 // A namespace name is a URI reference (Namespaces in XML 1.0 §2, RFC
 // 3986). White space is not permitted in a URI reference, and
@@ -1696,44 +1792,39 @@ function invalidNamespaceURI(uri: string): boolean {
   return false
 }
 
-// Returns '' on success or an XML namespace error code on the first
-// violation (reserved-prefix misuse, unbound prefix). On error the
-// tree may be partly annotated; callers should treat that as undefined.
-//
-// The walk keeps its own stack of elements still to visit rather than
-// recursing, since a document nested a few thousand elements deep would
-// otherwise exhaust the call stack with a RangeError, which carries no
-// error code. Children go on in reverse, so they come off in document
-// order: the walk is the pre-order a recursion makes, with the same first
-// error and the same partial annotation.
-function resolveScope(
-  root: XmlElement, rootScope: XmlScope, strict: boolean,
-): string {
-  const pending: [XmlElement, XmlScope][] = [[root, rootScope]]
-  while (0 < pending.length) {
-    const [element, scope] = pending.pop()!
-    const err = resolveElement(element, scope, strict, pending)
-    if (err) return err
-  }
-  return ''
+// What resolving one element gives: its `localName`; the members it
+// carries after `children`, in their order (`prefix`, `namespace`,
+// `space`, `lang`, each only when it applies); the scope its content
+// inherits; and '' or the code of a violation (reserved-prefix misuse, a
+// namespace name with white space, an unbound prefix when strict). On a
+// violation the result is what resolution leaves on the element it stops
+// at: no members for a bad declaration or attribute, `prefix` and the
+// local `localName` for an unbound element prefix.
+type Resolved = {
+  code: string
+  localName: string
+  fields: Record<string, string>
+  scope: XmlScope
 }
 
-// Resolve one element against the scope it inherits, and queue its
-// element children, last first, with the scope it passes on.
+// Resolve one element against the scope it inherits.
 function resolveElement(
-  element: XmlElement,
+  name: string,
+  attributes: Record<string, string>,
   scope: XmlScope,
   strict: boolean,
-  pending: [XmlElement, XmlScope][],
-): string {
+): Resolved {
   // Keyed by namespace prefixes the document controls, so it is allocated
   // without a prototype: `xmlns:__proto__` would otherwise reparent the scope
   // map, and prefix lookups would then resolve through Object.prototype.
   const ns: Record<string, any> = Object.assign(Object.create(null), scope.ns)
   let space = scope.space
   let lang = scope.lang
+  const fields: Record<string, string> = {}
+  const stop = (code: string, localName: string): Resolved =>
+    ({ code, localName, fields, scope })
 
-  const attrKeys = Object.keys(element.attributes || {})
+  const attrKeys = Object.keys(attributes || {})
 
   // Pass 1: every namespace declaration on this element, plus xml:space
   // / xml:lang. Namespaces in XML 1.0 §5.2 scopes a declaration over the
@@ -1743,23 +1834,23 @@ function resolveElement(
   // depend on attribute order, wrongly rejecting
   // `<a p:x="1" xmlns:p="..."/>`.
   for (const key of attrKeys) {
-    const val = element.attributes[key]
+    const val = attributes[key]
     if (key === 'xmlns') {
       if (val === XML_NS_URI || val === XMLNS_NS_URI) {
-        return 'reserved_namespace'
+        return stop('reserved_namespace', name)
       }
-      if (invalidNamespaceURI(val)) return 'invalid_namespace_uri'
+      if (invalidNamespaceURI(val)) return stop('invalid_namespace_uri', name)
       ns[''] = val
     } else if (key.startsWith('xmlns:')) {
       const prefix = key.substring(6)
       if (prefix === 'xml') {
-        if (val !== XML_NS_URI) return 'reserved_namespace'
+        if (val !== XML_NS_URI) return stop('reserved_namespace', name)
       } else if (prefix === 'xmlns') {
-        return 'reserved_namespace'
+        return stop('reserved_namespace', name)
       } else if (val === XML_NS_URI || val === XMLNS_NS_URI) {
-        return 'reserved_namespace'
+        return stop('reserved_namespace', name)
       }
-      if (invalidNamespaceURI(val)) return 'invalid_namespace_uri'
+      if (invalidNamespaceURI(val)) return stop('invalid_namespace_uri', name)
       ns[prefix] = val
     } else if (key === 'xml:space') {
       space = val
@@ -1780,44 +1871,34 @@ function resolveElement(
         // an unbound prefix on an attribute name leaves the attribute
         // unqualified but keeps the document XML 1.0 well-formed.
         if (!Object.prototype.hasOwnProperty.call(ns, ap)) {
-          return 'unbound_prefix'
+          return stop('unbound_prefix', name)
         }
       }
     }
   }
 
-  const colonIdx = element.name.indexOf(':')
+  let localName = name
+  const colonIdx = name.indexOf(':')
   if (colonIdx >= 0) {
-    const prefix = element.name.substring(0, colonIdx)
-    element.prefix = prefix
-    element.localName = element.name.substring(colonIdx + 1)
+    const prefix = name.substring(0, colonIdx)
+    fields.prefix = prefix
+    localName = name.substring(colonIdx + 1)
     if (Object.prototype.hasOwnProperty.call(ns, prefix)) {
-      element.namespace = ns[prefix]
+      fields.namespace = ns[prefix]
     } else if (strict) {
-      return 'unbound_prefix'
+      return stop('unbound_prefix', localName)
     }
     // Not strict: leave `namespace` unset — the element is named but
     // unqualified, which is what a namespace-unaware (yet XML 1.0
     // conformant) consumer sees.
-  } else {
-    element.localName = element.name
-    if (ns['']) {
-      element.namespace = ns['']
-    }
+  } else if (ns['']) {
+    fields.namespace = ns['']
   }
 
-  if (space !== 'default') (element as any).space = space
-  if (lang !== '') (element as any).lang = lang
+  if (space !== 'default') fields.space = space
+  if (lang !== '') fields.lang = lang
 
-  const childScope: XmlScope = { ns, space, lang }
-  const children = element.children
-  for (let i = children.length - 1; 0 <= i; i--) {
-    const child = children[i]
-    if (child && 'object' === typeof child) {
-      pending.push([child, childScope])
-    }
-  }
-  return ''
+  return { code: '', localName, fields, scope: { ns, space, lang } }
 }
 
 

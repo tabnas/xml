@@ -12,11 +12,12 @@ file covers only what is specific to this crate.
 | `src/lib.rs` | `XmlOptions`, the embedded grammar, the typed reference registrations, `xml`, `plugin`, `make`, `make_with`, `parse`, and the translation parts, `translate()` (its `embed` and `render`) with `manifest_text` and `render_text`, `include_str!` of the copies in `translate/` |
 | `src/lex.rs` | the imperative `xmltag` matcher: the one place raw XML syntax is recognised |
 | `src/entity.rs` | name and character classes, entity declaration and reference handling, DOCTYPE mining, line ending and attribute whitespace normalisation |
-| `src/namespace.rs` | prefix resolution over the finished tree |
+| `src/namespace.rs` | prefix resolution, one element at a time as its start tag is read, against the scope the element rule's `k` bag carries |
 | `src/bom.rs` | `decode_bom` and `strip_bom` |
 | `translate/` | the crate's copies of `../tabnas.plugin.json` (as `manifest.json`), `../alchemy/render.alc` and `../alchemy/embed.alc`, which a packaged crate needs, written by `npm run embed` from `../ts`; `tests/translate_test.rs` holds them to the files |
 | `tests/parity_test.rs` | every `../test/spec/*.tsv` fixture through `tabnas_support::Runner`, plus the named-column census |
 | `tests/xml_test.rs` | in-language cases mirrored from `go/xml_test.go`, `go/advance_col_test.go` and `go/perf_test.go` |
+| `tests/build_order_test.rs` | the order the rules build an element in, mirrored from `ts/test/build-order.test.ts`: the rule-pass sequence of a small document, rule depth over 10,000 siblings, and values with their member order |
 | `tests/xmlconf_test.rs` | the W3C conformance corpus, mirrored from `go/xmlconf_test.go` |
 | `tests/error_codes_test.rs` | the twenty error codes, read out of `ts/src/xml.ts` and `../tabnas.plugin.json` and compared with the catalogue an installed parser carries |
 | `tests/version_test.rs` | `Cargo.toml`, `VERSION` and `ts/package.json` must agree |
@@ -77,23 +78,32 @@ carried across fails the suite. Edit the `.jsonic` file first, run
 
 ## Every `@ref` is a typed registration
 
-The grammar names eight references: `@no-root-yet`,
+The grammar's alternates name ten references: `@no-root-yet`,
 `@element-selfclose`, `@element-open`, `@element-is-selfclosed`,
-`@element-close`, `@doc-text-open`, `@doc-text-close` and `@child-text`.
-`register_refs` installs all of them, and it runs BEFORE the document is
-installed, because the engine resolves names at install time. Adding a
-reference to the grammar without adding it here fails at install with an
-unresolved-name error, which is the behaviour you want.
+`@element-close`, `@content-close`, `@doc-text-open`, `@doc-text-close`,
+`@child-text` and `@xml-end`. Three more are lifecycle hooks the engine
+wires by name to their rule and phase: `@xml-bc`, `@children-bo` and
+`@child-bc`. `register_refs` installs all of them, and it runs BEFORE the
+document is installed, because the engine resolves names at install
+time. Adding a reference to the grammar without adding it here fails at
+install with an unresolved-name error, which is the behaviour you want.
 
 ## The shared node cell
 
 `*rule.node.borrow_mut() = value` overwrites the PARENT's node too, as a
 pushed rule shares the cell. `set_node` installs a fresh
 `Rc<RefCell<Value>>` instead, and that is what to use for the canonical
-`r.node = v`. The one deliberate exception is the `xml` close action,
-which writes through the borrow because the start rule's cell IS the
-document node. See `../../directive/rs/AGENTS.md` for the general form
-of this hazard.
+`r.node = v`: an element gets a cell of its own when its start tag is
+read, and so does the list of its children, made by `children`
+(`@children-bo`) and shared by the children it pushes and the children
+that replace them. That cell structure is what tabnas-transduce's
+incremental source follows (see "The order the rules build an element
+in" in `../AGENTS.md`). The deliberate exceptions write through the
+borrow because the start rule's cell, which the rules replacing it
+share, IS the document node: `@xml-bc` writes the root element into it,
+`@doc-text-close` takes it out while the white space after the root is
+read, and `@xml-end` puts it back. See `../../directive/rs/AGENTS.md`
+for the general form of this hazard.
 
 ## Lexer state lives under `Context::u`
 

@@ -65,11 +65,14 @@ describe('compose: xml + @tabnas/debug', () => {
     const m = tn.debug.model()
 
     // The structured rule set and entry rule. The XML grammar defines a
-    // four-rule chain: xml -> element -> content -> child.
+    // six-rule chain: xml -> element -> head (replaced by content) ->
+    // content -> children -> child.
     assert.deepStrictEqual(m.rules.map((r: any) => r.name).sort(), [
       'child',
+      'children',
       'content',
       'element',
+      'head',
       'xml',
     ])
 
@@ -83,16 +86,40 @@ describe('compose: xml + @tabnas/debug', () => {
     )
 
     // Structural facts specific to this grammar's push chain:
-    //   xml opens by pushing `element`; content opens by pushing `child`.
-    const xml = m.rules.find((r: any) => r.name === 'xml')
+    //   xml opens by pushing `element`; an element with content pushes
+    //   `head`, which reads nothing and closes by replacing itself with
+    //   `content`; content opens by pushing `children`, which opens by
+    //   pushing `child`, and a child closes by replacing itself with the
+    //   next child, so siblings are a replace loop, never a push chain.
+    const rule = (name: string) => m.rules.find((r: any) => r.name === name)
     assert.ok(
-      xml.open.some((a: any) => a.push === 'element'),
+      rule('xml').open.some((a: any) => a.push === 'element'),
       'xml should push element',
     )
-    const content = m.rules.find((r: any) => r.name === 'content')
     assert.ok(
-      content.open.some((a: any) => a.push === 'child'),
-      'content should push child',
+      rule('element').open.some((a: any) => a.push === 'head'),
+      'element should push head',
+    )
+    assert.deepStrictEqual(rule('head').open, [], 'head reads nothing')
+    assert.ok(
+      rule('head').close.some((a: any) => a.replace === 'content'),
+      'head should be replaced by content',
+    )
+    assert.ok(
+      rule('content').open.some((a: any) => a.push === 'children'),
+      'content should push children',
+    )
+    assert.ok(
+      rule('children').open.some((a: any) => a.push === 'child'),
+      'children should push child',
+    )
+    assert.ok(
+      rule('child').close.some((a: any) => a.replace === 'child'),
+      'a child should be replaced by the next',
+    )
+    assert.ok(
+      !rule('child').close.some((a: any) => a.push),
+      'a child never pushes the next',
     )
 
     // The grammar portion is JSON-serialisable and round-trips.
