@@ -1019,6 +1019,8 @@ pub struct TranslationParts {
     pub manifest: &'static str,
     /// An optional lift from the grammar's events to its first read shape.
     pub lift: Option<TranslationPart>,
+    /// An optional embedding of a plain tree in the format's schema, with its reverse.
+    pub embed: Option<TranslationPart>,
     /// An optional render from the write shape to text.
     pub render: Option<TranslationPart>,
 }
@@ -1026,6 +1028,10 @@ pub struct TranslationParts {
 const TRANSLATION: TranslationParts = TranslationParts {
     manifest: include_str!("../translate/manifest.json"),
     lift: None,
+    embed: Some(TranslationPart {
+        entry: "xml-embed",
+        source: Some(include_str!("../translate/embed.alc")),
+    }),
     render: Some(TranslationPart {
         entry: "xml-render",
         source: Some(include_str!("../translate/render.alc")),
@@ -1040,9 +1046,11 @@ pub const fn translate() -> Option<TranslationParts> {
 
 /// The plugin's manifest, `tabnas.plugin.json`, as the repository carries
 /// it. Its `translate` object is what a host that translates reads: the
-/// shape XML is read as and written from (`tree`), the file that holds
-/// the render, and the sentences that say what the render does not keep
-/// and which trees it writes. The crate embeds its own copy,
+/// shape XML is read as and written from (`tree`), the root it takes
+/// (`any`), the schema of the tree its events carry (`xml-element`), the
+/// files that hold the embedding of a plain tree in that schema and the
+/// render, and the sentences that say what the render does not keep and
+/// how a plain tree is written. The crate embeds its own copy,
 /// `translate/manifest.json`, since a packaged crate holds nothing
 /// outside `rs/`; `tests/translate_test.rs` holds the copy to the file.
 ///
@@ -1057,9 +1065,10 @@ pub fn manifest_text() -> &'static str {
 /// `translate.render` names: a library of alchemy definitions, with no
 /// `export`, whose entry point `xml-render` writes an element tree's
 /// events, the shape this reader builds, as one XML document, and
-/// refuses any other tree. A host links it with its own program. The
-/// crate embeds its own copy, `translate/render.alc`, held to the file
-/// as the manifest's is.
+/// refuses any other tree, and one holding a text, an attribute value
+/// or a name no XML document can hold. A host links it with its own
+/// program. The crate embeds its own copy, `translate/render.alc`, held
+/// to the file as the manifest's is.
 ///
 /// ```
 /// assert!(tabnas_xml::render_text().contains("def xml-render [input]"));
