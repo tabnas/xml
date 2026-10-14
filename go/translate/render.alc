@@ -78,6 +78,12 @@
 ; attribute or per child. Once the root element is written the state is
 ; `[:root-done]`, and nothing may follow it. Events no tree has fail
 ; with PROTOCOL_ORDER_ERROR, saying so.
+;
+; Each child of the root element, an element or a text, is a record of
+; the text: the step that ends one answers alchemy's `:record-end` after
+; its outputs, and so does the step that begins the root's children, so
+; a host's writer holds a child until its end, and a run that fails part
+; way leaves whole children behind.
 
 ; The top marker, or :none before the root element.
 def xml-top [s]
@@ -228,6 +234,14 @@ def xml-key [name s]
     case :end (xml-annotation name s)
     case _ (fail :protocol-order "the events hold a key where a value is due, which a tree's never do")
 
+; The outputs of a step that ends a child of the element whose markers
+; are s, with the end of a record after them when the element is the
+; root: its child is written whole.
+def xml-ended [s outputs]
+  match (count s)
+    case 2 (push :record-end outputs)
+    case _ outputs
+
 ; A scalar, in the phase that awaits it: the name, an XML name, which
 ; opens the tag and goes under the phase for the close tag; an
 ; attribute's value, closed with its quote; a text child, after the held
@@ -241,8 +255,8 @@ def xml-scalar [value s]
         case _ (xml-misplaced s)
     case :local (xml-string value (xml-mark :attributes-key s) s)
     case :attribute (transition (xml-mark :attribute-key s) [(xml-attr value) "\""])
-    case :first-child (transition (xml-mark :child s) [">" (xml-child value)])
-    case :child (transition s [(xml-child value)])
+    case :first-child (transition (xml-mark :child s) (xml-ended s [">" (xml-child value)]))
+    case :child (transition s (xml-ended s [(xml-child value)]))
     case :prefix (xml-string value (pop s) s)
     case :namespace (xml-string value (pop s) s)
     case :space (xml-string value (pop s) s)
@@ -262,7 +276,7 @@ def xml-object [s]
 ; An array: the children, and nothing else an element has.
 def xml-array [s]
   match (xml-top s)
-    case :children-start (transition (xml-mark :first-child s) [])
+    case :children-start (transition (xml-mark :first-child s) (xml-ended s []))
     case :first-child (fail :unrepresentable "the tree is not an XML element: a child is an array, where XML has text or an element")
     case :child (fail :unrepresentable "the tree is not an XML element: a child is an array, where XML has text or an element")
     case _ (xml-misplaced s)
@@ -289,7 +303,7 @@ def xml-close [s]
   let [s2 (pop (pop s))]
     match (count s2)
       case 0 (transition [:root-done] ["\n"])
-      case _ (transition s2 [])
+      case _ (transition s2 (xml-ended s2 []))
 
 ; The children's end: the close tag, or the self-closing tag's end when
 ; there was no child.
