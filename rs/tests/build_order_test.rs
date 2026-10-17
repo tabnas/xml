@@ -278,3 +278,51 @@ fn embed_mode_resolves_each_xml_literal_on_its_own_and_stops_at_its_first_violat
         )
     );
 }
+
+/// A start tag's token carries the attributes the element has, the
+/// DOCTYPE's defaults included: the lexer applies them as it reads the
+/// tag, after the tag's own and in declaration order, a value the tag
+/// gives winning, so a reader of the rule passes (a transducer part) sees
+/// them. Mirrors `ts/test/build-order.test.ts`.
+#[test]
+fn a_start_tags_token_carries_the_doctypes_default_attributes() {
+    let mut parser = tabnas_xml::make();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&seen);
+    parser.subscribe_rule_done(move |rule, _ctx, done| {
+        if !matches!(done.state, RuleState::Open) || rule.name.as_str() != "element" {
+            return;
+        }
+        let Some(token) = rule.o0() else {
+            return;
+        };
+        let Value::Object(tag) = &token.val else {
+            return;
+        };
+        if let Some(Value::Object(attributes)) = tag.get("attributes") {
+            let shown: Vec<String> = attributes
+                .iter()
+                .map(|(name, value)| format!("{name}={value}"))
+                .collect();
+            sink.lock().unwrap().push(shown.join(" "));
+        }
+    });
+    let value = parser
+        .parse(concat!(
+            r#"<!DOCTYPE r [<!ATTLIST r d CDATA "D"><!ATTLIST b x CDATA "X" y CDATA "Y">]>"#,
+            r#"<r a="1"><b y="own"/></r>"#
+        ))
+        .expect("parses");
+    drop(parser);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        [r#"a="1" d="D""#, r#"y="own" x="X""#]
+    );
+    assert_eq!(
+        value.to_string(),
+        concat!(
+            r#"{"name":"r","localName":"r","attributes":{"a":"1","d":"D"},"children":["#,
+            r#"{"name":"b","localName":"b","attributes":{"y":"own","x":"X"},"children":[]}]}"#
+        )
+    );
+}

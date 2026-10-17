@@ -18,3 +18,13 @@ test('translation parts expose the manifest, source and explicit entry', () => {
   assert.equal(parts.embed?.entry, 'xml-embed')
   assert.equal(parts.embed?.source, readFileSync(path.join(root, 'alchemy', 'embed.alc'), 'utf8'))
 })
+
+// The transducer part the manifest names is the one the package carries,
+// under the entry a host calls.
+test('translation parts carry the transducer the manifest names', () => {
+  const parts = translate()
+  assert.equal(parts.transduce?.entry, 'xml-transduce')
+  assert.equal(
+    parts.transduce?.source,
+    readFileSync(path.join(root, 'alchemy', 'transduce.alc'), 'utf8'))
+})

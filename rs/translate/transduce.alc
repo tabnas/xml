@@ -1,0 +1,215 @@
+; XML's transducer part: the document's JSON events from the xml
+; grammar's rule passes, for a host that reads parser events (alchemy-cli's
+; `translate` and `run --grammar xml`). It is hand-written, since the
+; element's members past its start tag, and the namespace scope they are
+; resolved in, are built in the grammar's actions, which the passes do not
+; show; every event is the one the walk of the grammar's value under its
+; default options gives.
+;
+; The passes: an `element`'s open carries its start tag's token (`#XOP`,
+; or `#XSC` for a self-closing one), whose value is a record of the
+; element's name and its attributes in source order; a `child`'s open
+; carries a text's token (`#TX`) and nothing for an element, which the
+; next `element` open carries; `head`, `content`, `children` and the rest
+; pass by, and the `xml` rule's own tokens are the white space around the
+; root, which the value does not keep. An element is the object the walk
+; writes: name, localName, attributes, children, then whichever of prefix,
+; namespace, space and lang it carries, in that order. The first three
+; come from the start tag; the children follow in document order, a text
+; as a string and an element as its object; and the members after
+; children are resolved here as the grammar resolves them, against the
+; open elements' attributes: the prefix before the name's first colon,
+; the namespace an `xmlns:prefix` of the nearest element declaring one
+; binds it to (for a name with no prefix, or an empty one, the default
+; namespace, which `xmlns` declares, and `xmlns:` too, as the grammar
+; reads it; `xml` is bound to the XML namespace), the innermost
+; `xml:space` that is not default, and the innermost `xml:lang` that is
+; not empty. A violation of the namespace rules fails the parse, in the
+; grammar, once the root element closes.
+;
+; The passes show the whole value: a DOCTYPE's entity is its replacement
+; text in the token, and a default an ATTLIST declares is in the start
+; tag's attributes, as the lexer applies it. A document the grammar
+; refuses fails the run after the events the passes before the refusal
+; give, as the walk fails it, and a host that reads a part commits no
+; byte of it. Over the 3,277 inputs of `test/spec/*.tsv` (the rows with
+; the default options) and the W3C conformance suite (`test/xmlconf/`,
+; which `scripts/fetch-xml-suite.sh` fetches), the part writes what the
+; walk writes for the 2,614 the grammar reads and fails as the walk fails
+; for the other 663.
+;
+; Two scans, since a step's outputs are one vector: the first yields an
+; item per pass, a start, a children marker, an end or a close as a
+; keyword in a vector, a text, and each attribute and each member after
+; children as a [name value] pair, the attributes of a start tag mapped
+; from its record; the second writes each item's events. The first's
+; state is [stack pending]: a frame per open element, [attributes closing
+; kind], innermost last, where closing holds the items its close yields
+; after the children (the end of the array, the members after children)
+; and kind is :open or :selfclosed; and the items a self-closing element's
+; close leaves for the pass that follows it, the close of the `child` or
+; `xml` rule around it, since its one close pass yields its attributes
+; and its children marker. Nothing grows with the document's length,
+; only with its nesting, under max_metadata_bytes.
+
+def xml-transduce-lookup [key scope]
+  let [holding (filter (fn [attrs] (match (get key attrs) (case missing false) (case _ true))) scope)]
+    match (count holding)
+      case 0 missing
+      case _ (get key (top holding))
+
+def xml-transduce-tail [parts]
+  map (fn [i] (get-path (path i) parts)) (filter (fn [i] (match i (case 0 false) (case _ true))) (indices parts))
+
+def xml-transduce-local [name parts]
+  match (count parts)
+    case 1 name
+    case _ (string-join ":" (xml-transduce-tail parts))
+
+def xml-transduce-prefix [parts]
+  match (count parts)
+    case 1 missing
+    case _ (get-path (path 0) parts)
+
+; Whether an element's attributes declare the default namespace: with
+; `xmlns`, or with `xmlns:`, a declaration of the empty prefix, which the
+; grammar reads as one of the default namespace.
+def xml-transduce-default-keys [attrs]
+  filter (fn [k] (match k (case "xmlns" true) (case "xmlns:" true) (case _ false))) (keys attrs)
+
+def xml-transduce-declares-default [attrs]
+  match (count (xml-transduce-default-keys attrs))
+    case 0 false
+    case _ true
+
+; The default namespace in scope: the one the innermost element declaring
+; one declares, the last of its declarations in attribute order; missing
+; where none does.
+def xml-transduce-default [scope]
+  let [declaring (filter xml-transduce-declares-default scope)]
+    match (count declaring)
+      case 0 missing
+      case _ (get (top (xml-transduce-default-keys (top declaring))) (top declaring))
+
+; The prefix and namespace members, pushed onto the closing items.
+def xml-transduce-namespace [prefix scope closing]
+  match prefix
+    case missing
+      match (xml-transduce-default scope)
+        case missing closing
+        case "" closing
+        case uri (push ["namespace" uri] closing)
+    case "xml" (push ["namespace" "http://www.w3.org/XML/1998/namespace"] (push ["prefix" "xml"] closing))
+    case ""
+      match (xml-transduce-default scope)
+        case missing (push ["prefix" ""] closing)
+        case uri (push ["namespace" uri] (push ["prefix" ""] closing))
+    case p
+      match (xml-transduce-lookup (string-join "" ["xmlns:" p]) scope)
+        case missing (push ["prefix" p] closing)
+        case uri (push ["namespace" uri] (push ["prefix" p] closing))
+
+def xml-transduce-space [scope closing]
+  match (xml-transduce-lookup "xml:space" scope)
+    case missing closing
+    case "default" closing
+    case s (push ["space" s] closing)
+
+def xml-transduce-lang [scope closing]
+  match (xml-transduce-lookup "xml:lang" scope)
+    case missing closing
+    case "" closing
+    case l (push ["lang" l] closing)
+
+; The items an element's close yields after its children: the end of the
+; children array, then the members after children.
+def xml-transduce-closing [prefix scope]
+  xml-transduce-lang scope (xml-transduce-space scope (xml-transduce-namespace prefix scope [[:children-end]]))
+
+; A start tag's attributes as pairs, then the children marker.
+def xml-transduce-attributes [attrs]
+  push [:children] (map (fn [k] [k (get k attrs)]) (keys attrs))
+
+def xml-transduce-frames [stack]
+  map (fn [frame] (get-path (path 0) frame)) stack
+
+; An element's start: its frame, holding its attributes, the items its
+; close yields after the children, and whether it closes itself.
+def xml-transduce-start [stack kind name attrs]
+  let [parts (split ":" name)]
+    let [closing (xml-transduce-closing (xml-transduce-prefix parts) (push attrs (xml-transduce-frames stack)))]
+      transition [(push [attrs closing kind] stack) missing] [[:start name (xml-transduce-local name parts)]]
+
+def xml-transduce-element [stack token]
+  let [tag (get :val token)]
+    match (get :name token)
+      case "#XSC" (xml-transduce-start stack :selfclosed (get "name" tag) (get "attributes" tag))
+      case _ (xml-transduce-start stack :open (get "name" tag) (get "attributes" tag))
+
+; An open pass: an element's start, from its start tag's token; the
+; attributes and the children marker, when `head` opens on the element's
+; frame; and a text, from the token a `child` opens on (one that opens on
+; an element gives its token back, and the element's open carries it).
+def xml-transduce-open [stack rule]
+  match (get :name rule)
+    case "element"
+      match (transduce-token 0 rule)
+        case missing (transition [stack missing] [])
+        case token (xml-transduce-element stack token)
+    case "head"
+      match (top stack)
+        case [attrs closing kind] (transition [stack missing] (xml-transduce-attributes attrs))
+    case "child"
+      match (transduce-token 0 rule)
+        case missing (transition [stack missing] [])
+        case token (transition [stack missing] [[:text (get :val token)]])
+    case _ (transition [stack missing] [])
+
+; A close pass: an element's end. One with content yields the items its
+; frame holds and the object's end; a self-closing one, which has no
+; `head`, yields its attributes and the children marker, and leaves the
+; items its frame holds, and the object's end, to the pass that follows.
+def xml-transduce-close [stack rule]
+  match (get :name rule)
+    case "element"
+      match (top stack)
+        case [attrs closing :open] (transition [(pop stack) missing] (push [:close] closing))
+        case [attrs closing :selfclosed] (transition [(pop stack) (push [:close] closing)] (xml-transduce-attributes attrs))
+    case _ (transition [stack missing] [])
+
+; The pass after a self-closing element's close is the close of the
+; `child` or the `xml` rule around it, which yields the items it left.
+def xml-transduce-pending [stack items pass]
+  match pass
+    case (close rule)
+      match (get :name rule)
+        case "child" (transition [stack missing] items)
+        case "xml" (transition [stack missing] items)
+        case _ (fail :protocol-order "a self-closing element's close was followed by a pass the grammar never makes there")
+    case _ (fail :protocol-order "a self-closing element's close was followed by a pass the grammar never makes there")
+
+def xml-transduce-step [state pass]
+  match state
+    case [stack missing]
+      match pass
+        case (open rule) (xml-transduce-open stack rule)
+        case (close rule) (xml-transduce-close stack rule)
+    case [stack items] (xml-transduce-pending stack items pass)
+
+def xml-transduce-finish [state]
+  match state
+    case [[] missing] []
+    case [[] items] items
+    case _ (fail :protocol-order "the rule passes ended inside an element, which a document's never do")
+
+def xml-transduce-expand [state item]
+  match item
+    case [:start name local] (transition state [object-start (key "name") (scalar name) (key "localName") (scalar local) (key "attributes") object-start])
+    case [:children] (transition state [object-end (key "children") array-start])
+    case [:children-end] (transition state [array-end])
+    case [:close] (transition state [object-end])
+    case [:text s] (transition state [(scalar s)])
+    case [name value] (transition state [(key name) (scalar value)])
+
+def xml-transduce [input]
+  as-events (scan-emit [] xml-transduce-expand (fn [state] []) (scan-emit [[] missing] xml-transduce-step xml-transduce-finish (parser-events input)))

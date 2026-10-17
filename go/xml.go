@@ -347,7 +347,11 @@ func Xml(j *tabnas.Tabnas, options map[string]any) error {
 	startElement := func(r *tabnas.Rule, ctx *tabnas.Context, selfclose bool) {
 		v := r.O0.Val.(map[string]any)
 		name := v["name"].(string)
-		attrs := applyAttrDefaults(v["attributes"].(*tabnas.OrderedMap), name, ctx)
+		// The DOCTYPE's defaults are in the token's attributes already:
+		// the lexer applies them when it reads the start tag
+		// (applyAttrDefaults), so a reader of the rule passes sees the
+		// element's attributes whole.
+		attrs := v["attributes"].(*tabnas.OrderedMap)
 		localName := name
 		var fields map[string]any
 		if namespacesOn {
@@ -704,6 +708,10 @@ func checkDocText(tkn *tabnas.Token, ctx *tabnas.Context) {
 
 // applyAttrDefaults merges in DOCTYPE-supplied default attribute
 // values for any attribute missing from the parsed element instance.
+// The lexer calls it as it makes a start tag's token, so the token
+// carries the attributes the element has, the defaults included, and a
+// consumer of the rule passes (a transducer part) sees them; the
+// element's action takes them from the token.
 // The tag's own attributes keep their source order and the defaults
 // follow them in declaration order, as in ts/src/xml.ts, where the
 // defaults are added to a copy of the tag's attributes object. Returns
@@ -1534,7 +1542,7 @@ func buildXmlTagMatcher(
 				if src[i] == '>' {
 					finish := i + 1
 					tsrc := src[sI:finish]
-					val := map[string]any{"name": name, "attributes": attrs}
+					val := map[string]any{"name": name, "attributes": applyAttrDefaults(attrs, name, lex.Ctx)}
 					tkn := lex.Token("#XOP", xopTin, val, tsrc)
 					advance(pnt, src, sI, finish)
 					setXmlDepth(lex, xmlDepth(lex)+1)
@@ -1543,7 +1551,7 @@ func buildXmlTagMatcher(
 				if src[i] == '/' && i+1 < srclen && src[i+1] == '>' {
 					finish := i + 2
 					tsrc := src[sI:finish]
-					val := map[string]any{"name": name, "attributes": attrs}
+					val := map[string]any{"name": name, "attributes": applyAttrDefaults(attrs, name, lex.Ctx)}
 					tkn := lex.Token("#XSC", xscTin, val, tsrc)
 					advance(pnt, src, sI, finish)
 					// #XSC is an instantly-closed element; depth unchanged.
@@ -1955,7 +1963,10 @@ func resolveElement(
 		// Not strict: leave `namespace` unset — the element is named but
 		// unqualified, which is what a namespace-unaware (yet XML 1.0
 		// conformant) consumer sees.
-	} else if uri, ok := local.ns[""]; ok {
+	} else if uri := local.ns[""]; uri != "" {
+		// An empty default namespace, as xmlns="" declares it, undeclares
+		// it (Namespaces in XML 1.0 §6.2): the element is in no namespace
+		// and carries no `namespace`, as in ts/src/xml.ts.
 		fields["namespace"] = uri
 	}
 

@@ -143,6 +143,31 @@ describe('build-order', () => {
     assert.throws(() => strict.parse('<a><p:b/></c>'), { code: 'xml_mismatched_tag' })
   })
 
+  test("a start tag's token carries the DOCTYPE's default attributes", () => {
+    // The lexer applies them as it reads the tag, after the tag's own and
+    // in declaration order, a value the tag gives winning, so a reader of
+    // the rule passes (a transducer part) sees them.
+    const tn = new Tabnas().use(Xml)
+    const seen: string[] = []
+    tn.sub({
+      ruleDone: (rule: any, _ctx: any, done: any) => {
+        if ('o' !== done.state || 'element' !== rule.name) return
+        const attributes = rule.o0.val.attributes
+        seen.push(Object.keys(attributes).map((k) => `${k}=${JSON.stringify(attributes[k])}`).join(' '))
+      },
+    })
+    const value = tn.parse(
+      '<!DOCTYPE r [<!ATTLIST r d CDATA "D"><!ATTLIST b x CDATA "X" y CDATA "Y">]>' +
+        '<r a="1"><b y="own"/></r>',
+    )
+    assert.deepStrictEqual(seen, ['a="1" d="D"', 'y="own" x="X"'])
+    assert.equal(
+      JSON.stringify(value),
+      '{"name":"r","localName":"r","attributes":{"a":"1","d":"D"},"children":[' +
+        '{"name":"b","localName":"b","attributes":{"y":"own","x":"X"},"children":[]}]}',
+    )
+  })
+
   test('embed mode resolves each XML literal on its own, and stops at its first violation', () => {
     const embed = new Tabnas().use(jsonic).use(Xml, { embed: true, strictNamespaces: true })
     assert.equal(

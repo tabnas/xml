@@ -453,7 +453,10 @@ Expected </{openname}> but found </{closename}>.`,
   function startElement(r: Rule, ctx: Context, selfclose: boolean) {
     const v = r.o0.val
     const name: string = v.name
-    const attributes = applyAttrDefaults(v.attributes, name, ctx)
+    // The DOCTYPE's defaults are in the token's attributes already: the
+    // lexer applies them when it reads the start tag (applyAttrDefaults),
+    // so a reader of the rule passes sees the element's attributes whole.
+    const attributes = v.attributes
     let localName = name
     let fields: Record<string, string> = {}
     if (options.namespaces !== false) {
@@ -956,7 +959,11 @@ function parseDoctypeAttlists(body: string): Record<string, Record<string, strin
 // applyAttrDefaults merges in DOCTYPE-supplied default attribute
 // values (`<!ATTLIST element attr ... "default">`) for any attribute
 // missing from the parsed element instance. Returns the original
-// attributes object if no defaults apply.
+// attributes object if no defaults apply. The lexer calls it as it
+// makes a start tag's token, so the token carries the attributes the
+// element has, the defaults included, and a consumer of the rule passes
+// (a transducer part) sees them; the element's action takes them from
+// the token.
 function applyAttrDefaults(
   attrs: Record<string, string>,
   elemName: string,
@@ -1498,7 +1505,7 @@ function buildXmlTagMatcher(
 
         if (src[i] === '>') {
           const end = i + 1
-          const tkn = lex.token('#XOP', { name, attributes }, src.substring(sI, end), pnt)
+          const tkn = lex.token('#XOP', { name, attributes: applyAttrDefaults(attributes, name, lex.ctx) }, src.substring(sI, end), pnt)
           pnt.sI = end
           pnt.cI += end - sI
           if (lex.ctx) {
@@ -1509,7 +1516,7 @@ function buildXmlTagMatcher(
         }
         if (src[i] === '/' && src[i + 1] === '>') {
           const end = i + 2
-          const tkn = lex.token('#XSC', { name, attributes }, src.substring(sI, end), pnt)
+          const tkn = lex.token('#XSC', { name, attributes: applyAttrDefaults(attributes, name, lex.ctx) }, src.substring(sI, end), pnt)
           pnt.sI = end
           pnt.cI += end - sI
           // #XSC is an instantly-closed element, so depth is unchanged.

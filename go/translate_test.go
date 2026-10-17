@@ -7,6 +7,23 @@ import (
 	"testing"
 )
 
+// The transducer part the manifest names is the one the package embeds,
+// under the entry a host calls.
+func TestTranslationTransduce(t *testing.T) {
+	inCheckout(t)
+	parts := Translate()
+	if parts.Transduce == nil || parts.Transduce.Entry != "xml-transduce" {
+		t.Fatalf("transduce entry is %#v", parts.Transduce)
+	}
+	transduce, err := os.ReadFile("../alchemy/transduce.alc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parts.Transduce.Source != string(transduce) {
+		t.Fatal("embedded transducer differs from alchemy/transduce.alc")
+	}
+}
+
 func TestTranslationParts(t *testing.T) {
 	inCheckout(t)
 	parts := Translate()

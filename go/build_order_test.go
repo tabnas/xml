@@ -245,3 +245,46 @@ func TestEmbedModeResolvesEachXMLLiteralOnItsOwnAndStopsAtItsFirstViolation(t *t
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
 }
+
+// A start tag's token carries the attributes the element has, the
+// DOCTYPE's defaults included: the lexer applies them as it reads the
+// tag, after the tag's own and in declaration order, a value the tag
+// gives winning, so a reader of the rule passes (a transducer part) sees
+// them. Mirrors ts/test/build-order.test.ts.
+func TestAStartTagsTokenCarriesTheDoctypesDefaultAttributes(t *testing.T) {
+	j := pureParser(t)
+	var seen []string
+	j.SubRuleDone(func(rule *tabnas.Rule, _ *tabnas.Context, done tabnas.RuleDone) {
+		if done.State != "o" || rule.Name != "element" || rule.O0 == nil {
+			return
+		}
+		tag, ok := rule.O0.Val.(map[string]any)
+		if !ok {
+			return
+		}
+		attrs, ok := tag["attributes"].(*tabnas.OrderedMap)
+		if !ok {
+			return
+		}
+		var shown []string
+		for _, k := range attrs.Keys {
+			shown = append(shown, fmt.Sprintf("%s=%q", k, attrs.Vals[k]))
+		}
+		seen = append(seen, strings.Join(shown, " "))
+	})
+	out, err := j.Parse(`<!DOCTYPE r [<!ATTLIST r d CDATA "D"><!ATTLIST b x CDATA "X" y CDATA "Y">]>` +
+		`<r a="1"><b y="own"/></r>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{`a="1" d="D"`, `y="own" x="X"`}
+	if fmt.Sprint(seen) != fmt.Sprint(want) {
+		t.Errorf("the start tags' tokens carry %q, want %q", seen, want)
+	}
+	got, _ := json.Marshal(out)
+	value := `{"attributes":{"a":"1","d":"D"},"children":[` +
+		`{"attributes":{"y":"own","x":"X"},"children":[],"localName":"b","name":"b"}],"localName":"r","name":"r"}`
+	if string(got) != value {
+		t.Errorf("got  %s\nwant %s", got, value)
+	}
+}

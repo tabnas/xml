@@ -66,6 +66,7 @@
     "schema": "xml-element",
     "embed": "alchemy/embed.alc",
     "render": "alchemy/render.alc",
+    "transduce": "alchemy/transduce.alc",
     "loss": [
       "An element tree, the one the reader builds, is written as it is: an object whose members are name, localName, attributes and children, with text and elements as children; one whose text or attribute value holds a character XML cannot carry, or whose element or attribute name is not an XML name, is refused, since no XML document holds it.",
       "A plain tree, from another format or a program, is written through the embedding and read back by the same convention: the root value as the element document, an object as an element of type=\"object\" whose members are member elements, each with a name attribute holding its key, and an array as an element of type=\"array\" whose elements are item elements.",

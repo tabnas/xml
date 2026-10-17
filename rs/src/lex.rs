@@ -468,7 +468,7 @@ fn scan(state: &MatcherState, context: &mut Context, rest: &str) -> Scan {
             return Scan::Token {
                 name: "#XOP",
                 tin: state.tokens.xop,
-                val: tag_value(name, attributes),
+                val: tag_value(name, with_attr_defaults(attributes, name, context)),
                 end: i + 1,
             };
         }
@@ -477,7 +477,7 @@ fn scan(state: &MatcherState, context: &mut Context, rest: &str) -> Scan {
             return Scan::Token {
                 name: "#XSC",
                 tin: state.tokens.xsc,
-                val: tag_value(name, attributes),
+                val: tag_value(name, with_attr_defaults(attributes, name, context)),
                 end: i + 2,
             };
         }
@@ -552,6 +552,27 @@ fn scan(state: &MatcherState, context: &mut Context, rest: &str) -> Scan {
             Value::String(state.decoder.decode(&normalised, &dtd)),
         );
     }
+}
+
+/// Fill in DOCTYPE-supplied default attribute values (`<!ATTLIST element
+/// attr ... "default">`) for any attribute the start tag does not carry,
+/// after the tag's own, in declaration order. The token carries the
+/// attributes the element has, the defaults included, so a consumer of
+/// the rule passes (a transducer part) sees them; the element's action
+/// takes them from the token.
+fn with_attr_defaults(
+    mut attributes: IndexMap<String, Value>,
+    element: &str,
+    context: &Context,
+) -> IndexMap<String, Value> {
+    if let Some(defaults) = dtd_attr_defaults(context, element) {
+        for (name, value) in defaults {
+            if !attributes.contains_key(&name) {
+                attributes.insert(name, value);
+            }
+        }
+    }
+    attributes
 }
 
 /// The value of an open or self-closing tag token.
