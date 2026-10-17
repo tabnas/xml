@@ -1963,7 +1963,10 @@ func resolveElement(
 		// Not strict: leave `namespace` unset — the element is named but
 		// unqualified, which is what a namespace-unaware (yet XML 1.0
 		// conformant) consumer sees.
-	} else if uri, ok := local.ns[""]; ok {
+	} else if uri := local.ns[""]; uri != "" {
+		// An empty default namespace, as xmlns="" declares it, undeclares
+		// it (Namespaces in XML 1.0 §6.2): the element is in no namespace
+		// and carries no `namespace`, as in ts/src/xml.ts.
 		fields["namespace"] = uri
 	}
 

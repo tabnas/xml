@@ -7,6 +7,10 @@ default-ns	<a xmlns="http://example.com"><b/></a>	{"name":"a","localName":"a","n
 prefix-ns	<root xmlns:x="http://x.example"><x:a x:k="v">body</x:a></root>	{"name":"root","localName":"root","attributes":{"xmlns:x":"http://x.example"},"children":[{"name":"x:a","prefix":"x","localName":"a","namespace":"http://x.example","attributes":{"x:k":"v"},"children":["body"]}]}
 prefix-inherited	<a xmlns:p="http://p.example"><p:b><p:c/></p:b></a>	{"name":"a","localName":"a","attributes":{"xmlns:p":"http://p.example"},"children":[{"name":"p:b","prefix":"p","localName":"b","namespace":"http://p.example","attributes":{},"children":[{"name":"p:c","prefix":"p","localName":"c","namespace":"http://p.example","attributes":{},"children":[]}]}]}
 default-override	<a xmlns="A"><b xmlns="B"><c/></b><d/></a>	{"name":"a","localName":"a","namespace":"A","attributes":{"xmlns":"A"},"children":[{"name":"b","localName":"b","namespace":"B","attributes":{"xmlns":"B"},"children":[{"name":"c","localName":"c","namespace":"B","attributes":{},"children":[]}]},{"name":"d","localName":"d","namespace":"A","attributes":{},"children":[]}]}
+# xmlns="" undeclares the default namespace (Namespaces in XML 1.0 §6.2):
+# an unprefixed element in its scope is in no namespace, and carries no
+# `namespace` member.
+default-undeclared	<a xmlns="A"><b xmlns=""><c/></b><d/></a>	{"name":"a","localName":"a","namespace":"A","attributes":{"xmlns":"A"},"children":[{"name":"b","localName":"b","attributes":{"xmlns":""},"children":[{"name":"c","localName":"c","attributes":{},"children":[]}]},{"name":"d","localName":"d","namespace":"A","attributes":{},"children":[]}]}
 namespaces-disabled	<a xmlns="http://example.com"/>	{"name":"a","localName":"a","attributes":{"xmlns":"http://example.com"},"children":[]}	{"namespaces":false}
 xml-prefix-implicit	<a xml:lang="en"/>	{"name":"a","localName":"a","attributes":{"xml:lang":"en"},"lang":"en","children":[]}
 xml-prefix-explicit-correct-uri	<a xmlns:xml="http://www.w3.org/XML/1998/namespace"/>	{"name":"a","localName":"a","attributes":{"xmlns:xml":"http://www.w3.org/XML/1998/namespace"},"children":[]}
