@@ -74,6 +74,27 @@ fn the_embed_the_manifest_names_is_the_one_the_crate_embeds() {
 }
 
 #[test]
+fn the_transducer_the_manifest_names_is_the_one_the_crate_embeds() {
+    let translate = translate();
+    let path = translate["transduce"]
+        .as_str()
+        .expect("translate.transduce names a file");
+    let on_disk = fs::read_to_string(common::repo_root().join(path))
+        .unwrap_or_else(|e| panic!("translate.transduce names {path}, which cannot be read: {e}"));
+    let parts = tabnas_xml::translate().expect("XML carries translation parts");
+    let transduce = parts
+        .transduce
+        .expect("translate.transduce names a file, and the crate carries no transducer");
+    assert_eq!(transduce.entry, "xml-transduce");
+    assert_eq!(
+        transduce.source,
+        Some(on_disk.as_str()),
+        "translate.transduce names {path}, and rs/translate/transduce.alc, which translate() \
+         carries, is another text: run npm run embed in ts"
+    );
+}
+
+#[test]
 fn the_structural_interface_names_the_render_and_embed_entries() {
     let parts = tabnas_xml::translate().expect("XML carries translation parts");
     assert_eq!(parts.manifest, tabnas_xml::manifest_text());

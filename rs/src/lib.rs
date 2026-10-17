@@ -568,9 +568,10 @@ fn token_string(token: Option<&Token>) -> Option<String> {
     }
 }
 
-/// The name and the attributes (with the DOCTYPE defaults filled in) an
-/// open or self-closing tag token carries.
-fn tag_of(token: Option<&Token>, context: &Context) -> (String, IndexMap<String, Value>) {
+/// The name and the attributes (with the DOCTYPE defaults filled in, as
+/// the lexer applies them when it reads the start tag) an open or
+/// self-closing tag token carries.
+fn tag_of(token: Option<&Token>) -> (String, IndexMap<String, Value>) {
     let (name, attributes) = match token.map(|token| &token.val) {
         Some(Value::Object(tag)) => {
             let name = match tag.get("name") {
@@ -585,7 +586,6 @@ fn tag_of(token: Option<&Token>, context: &Context) -> (String, IndexMap<String,
         }
         _ => (String::new(), IndexMap::new()),
     };
-    let attributes = apply_attr_defaults(attributes, &name, context);
     (name, attributes)
 }
 
@@ -609,7 +609,7 @@ fn start_element(
     namespaces: bool,
     strict: bool,
 ) {
-    let (name, attributes) = tag_of(rule.o0(), context);
+    let (name, attributes) = tag_of(rule.o0());
     let mut local_name = name.clone();
     let mut fields = IndexMap::new();
     if namespaces {
@@ -660,23 +660,6 @@ fn start_element(
             .insert(FIELDS.to_string(), Value::object(fields));
     }
     set_node(rule, Value::object(element));
-}
-
-/// Fill in DOCTYPE-supplied default attribute values (`<!ATTLIST element
-/// attr ... "default">`) for any attribute the element does not carry.
-fn apply_attr_defaults(
-    mut attributes: IndexMap<String, Value>,
-    element: &str,
-    context: &Context,
-) -> IndexMap<String, Value> {
-    if let Some(defaults) = lex::dtd_attr_defaults(context, element) {
-        for (name, value) in defaults {
-            if !attributes.contains_key(&name) {
-                attributes.insert(name, value);
-            }
-        }
-    }
-    attributes
 }
 
 /// XML 1.0 2.1 [1] `document ::= prolog element Misc*`: at document level
@@ -1160,6 +1143,9 @@ pub struct TranslationParts {
     pub embed: Option<TranslationPart>,
     /// An optional render from the write shape to text.
     pub render: Option<TranslationPart>,
+    /// An optional transducer: the format's JSON events from its parser's
+    /// rule passes, for a host that reads parser events.
+    pub transduce: Option<TranslationPart>,
 }
 
 const TRANSLATION: TranslationParts = TranslationParts {
@@ -1172,6 +1158,10 @@ const TRANSLATION: TranslationParts = TranslationParts {
     render: Some(TranslationPart {
         entry: "xml-render",
         source: Some(include_str!("../translate/render.alc")),
+    }),
+    transduce: Some(TranslationPart {
+        entry: "xml-transduce",
+        source: Some(include_str!("../translate/transduce.alc")),
     }),
 };
 
@@ -1186,10 +1176,14 @@ pub const fn translate() -> Option<TranslationParts> {
 /// shape XML is read as and written from (`tree`), the root it takes
 /// (`any`), the schema of the tree its events carry (`xml-element`), the
 /// files that hold the embedding of a plain tree in that schema and the
-/// render, and the sentences that say what the render does not keep and
-/// how a plain tree is written. The crate embeds its own copy,
-/// `translate/manifest.json`, since a packaged crate holds nothing
-/// outside `rs/`; `tests/translate_test.rs` holds the copy to the file.
+/// render, the sentences that say what the render does not keep and how
+/// a plain tree is written, and the file that holds the transducer part
+/// (`transduce`), the document's JSON events from the grammar's rule
+/// passes under its default options, through which a host that reads
+/// parser events reads a document. The crate embeds its own copies,
+/// `translate/manifest.json` and `translate/transduce.alc`, since a
+/// packaged crate holds nothing outside `rs/`; `tests/translate_test.rs`
+/// holds each copy to its file.
 ///
 /// ```
 /// assert!(tabnas_xml::manifest_text().contains("\"translate\""));
