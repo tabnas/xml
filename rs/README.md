@@ -92,6 +92,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+A parser can also read a UTF-8 document from a reader. `make` and
+`make_with` declare the engine's `lex.window` option, so
+`Tabnas::parse_reader` keeps a window of the source, from the oldest
+token the parser holds to some 64 KiB past the cursor, rather than the
+whole text. The plugin's matcher reads the text only through that
+window, and reads it on where a construct runs past its end, so the
+window grows only as far as one token is long. The value and the errors
+are those of `parse` of the same text, but for an error's excerpt of a
+very long line, which shows the line only as far back as the window
+reaches.
+
+```rust,no_run
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let parser = tabnas_xml::make();
+    let value = parser.parse_reader(std::fs::File::open("doc.xml")?)?;
+    println!("{value}");
+    Ok(())
+}
+```
+
 ## Install
 
 The crate and the engine are published on crates.io. The engine's

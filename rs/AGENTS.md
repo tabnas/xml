@@ -19,10 +19,11 @@ file covers only what is specific to this crate.
 | `tests/xml_test.rs` | in-language cases mirrored from `go/xml_test.go`, `go/advance_col_test.go` and `go/perf_test.go` |
 | `tests/build_order_test.rs` | the order the rules build an element in, mirrored from `ts/test/build-order.test.ts`: the rule-pass sequence of a small document, rule depth over 10,000 siblings, and values with their member order |
 | `tests/xmlconf_test.rs` | the W3C conformance corpus, mirrored from `go/xmlconf_test.go` |
+| `tests/window_test.rs` | a parse from a reader a window at a time against the same text parsed whole: every fixture row and every corpus document in pieces of 1, 3 and 64 bytes, under the engine's window and windows of a few characters, and long documents whose tokens of every kind are longer than the window (`../AGENTS.md`, "Reading a source from a reader") |
 | `tests/error_codes_test.rs` | the twenty error codes, read out of `ts/src/xml.ts` and `../tabnas.plugin.json` and compared with the catalogue an installed parser carries |
 | `tests/version_test.rs` | `Cargo.toml`, `VERSION` and `ts/package.json` must agree |
 | `tests/translate_test.rs` | the translation parts: the render, the embedding and the transducer the embedded manifest names are the ones the crate embeds, the transducer under the entry `xml-transduce`, the manifest's shapes, root, schema and loss lines, and every definition of both named `xml-...` |
-| `tests/common/mod.rs` | the value normaliser and the fixture unescape both suites share |
+| `tests/common/mod.rs` | the value normaliser, the fixture unescape and the W3C corpus (`corpus()`, which fetches it) the suites share |
 | `README.md` | the crate front page; gated prose, listed in `ts/scripts/gated-docs.cjs` and so checked by `ts/test/docs.test.js` and `make prose` |
 
 ## Three crates by path

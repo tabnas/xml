@@ -56,6 +56,11 @@ string values, in the order the tag writes them), and `children`
 (`[]any`), plus, where they apply, `prefix`, `namespace`, `space`, and
 `lang`.
 
+`tabnasxml.Make()` builds the same parser and declares the engine's
+window option on it, so `ParseReader` reads a document from a reader a
+window at a time rather than whole. The
+[reference](doc/reference.md#reading-from-a-reader) has the details.
+
 ## Documentation
 
 Organised by the [Diátaxis](https://diataxis.fr) framework:

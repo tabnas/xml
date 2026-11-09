@@ -5,6 +5,8 @@
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::OnceLock;
 
 use tabnas::{Tabnas, Value};
 use tabnas_support::{find_spec_dir, Failure};
@@ -15,6 +17,52 @@ pub fn repo_root() -> PathBuf {
         .parent()
         .expect("rs/ has a parent")
         .to_path_buf()
+}
+
+/// The W3C XML Conformance Test Suite, fetched into `test/xmlconf/` by
+/// `scripts/fetch-xml-suite.sh` (gitignored: the corpus is W3C-owned and
+/// never committed).
+pub fn conf_root() -> PathBuf {
+    repo_root().join("test").join("xmlconf")
+}
+
+pub fn catalog_path() -> PathBuf {
+    conf_root().join("xmlconf.xml")
+}
+
+/// The corpus root, fetched on first use. Panics, and so fails the test,
+/// when the corpus is missing and cannot be fetched.
+pub fn corpus() -> &'static Path {
+    static ROOT: OnceLock<PathBuf> = OnceLock::new();
+    ROOT.get_or_init(|| {
+        if !catalog_path().is_file() {
+            let script = repo_root().join("scripts").join("fetch-xml-suite.sh");
+            eprintln!(
+                "W3C XML conformance corpus missing; running {}",
+                script.display()
+            );
+            let status = Command::new("bash")
+                .arg(&script)
+                .current_dir(repo_root())
+                .status();
+            match status {
+                Ok(status) if status.success() => {}
+                other => panic!(
+                    "\nFATAL: the W3C XML Conformance Test Suite is missing and could not be fetched.\n  \
+                     expected catalogue: {}\n  fetch: {other:?}\n  \
+                     fix: run scripts/fetch-xml-suite.sh (needs network access to w3.org)\n  \
+                     these tests do NOT skip.\n",
+                    catalog_path().display()
+                ),
+            }
+        }
+        assert!(
+            catalog_path().is_file(),
+            "FATAL: corpus still missing after fetch: {}",
+            catalog_path().display()
+        );
+        conf_root()
+    })
 }
 
 /// The shared `test/spec` directory, found by walking up from the crate
@@ -76,7 +124,7 @@ pub fn strip_ansi(text: &str) -> String {
 /// RAW cell; after the shared codec an escaped backslash followed by
 /// `uFEFF` is indistinguishable from a plain `﻿`.
 ///
-/// Kept byte-identical to `unescapeInput` in `ts/test/xml-spec.test.ts`
+/// Kept byte-identical to `unescapeInput` in `ts/test/spec-input.ts`
 /// and `specUnescape` in `go/xml_test.go`.
 pub fn spec_unescape(s: &str) -> String {
     if !s.contains('\\') {

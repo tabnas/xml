@@ -216,6 +216,12 @@ func Xml(j *tabnas.Tabnas, options map[string]any) error {
 	j.SetOptions(tabnas.Options{
 		Parse: &tabnas.ParseOptions{Prepare: map[string]func(*tabnas.Context){
 			"xml-fields": func(ctx *tabnas.Context) {
+				// Parse gives every parse a metadata map; ParseReader and
+				// ParseMeta(src, nil) give a parse without metadata none
+				// (tabnas/parser#323).
+				if ctx.Meta == nil {
+					ctx.Meta = map[string]any{}
+				}
 				ctx.Meta["fields"] = xmlElementFields
 			},
 		}},
@@ -657,6 +663,48 @@ func Xml(j *tabnas.Tabnas, options map[string]any) error {
 	}
 
 	return nil
+}
+
+// Make returns an XML parser: the engine with this plugin installed and
+// configured with options, the counterpart of TypeScript's make(options)
+// and Rust's make_with. It is the engine of tabnas.Make() then
+//
+//	err := j.UseDefaults(Xml, Defaults, options)
+//
+// which parses every document as a jsonic engine with the plugin does: in
+// pure mode the plugin removes jsonic's value rules and switches off every
+// lexer but its own matcher, so neither engine is left with anything the
+// other lacks (window_test.go holds the two to the same values and errors
+// over every fixture and every conformance document). The option keys are
+// the plugin's own (see Defaults); more than one map is merged in order, a
+// later key winning.
+//
+// The parser reads a source from a reader a window at a time
+// (ParseReader, admin ADR-30) rather than whole: its tokens are the
+// plugin's matcher's and the engine's own, and the matcher reads the text
+// only through the lexer's window, reading it on where a construct runs
+// past the window's end, so the parser declares Lex.Window. The option is
+// set here, on the parser this package makes whole, and not in Xml, which
+// other grammars install beneath matchers of their own (feed) and embed
+// mode installs on a jsonic engine.
+//
+// It returns an error rather than panicking because the options are the
+// caller's data and the plugin refuses some of them: embed mode needs a
+// jsonic engine, which this is not.
+func Make(options ...map[string]any) (*tabnas.Tabnas, error) {
+	j := tabnas.Make()
+	merged := map[string]any{}
+	for _, o := range options {
+		if o != nil {
+			merged = tabnas.Deep(merged, o).(map[string]any)
+		}
+	}
+	if err := j.UseDefaults(Xml, Defaults, merged); err != nil {
+		return nil, err
+	}
+	window := true
+	j.SetOptions(tabnas.Options{Lex: &tabnas.LexOptions{Window: &window}})
+	return j, nil
 }
 
 // dtdEntities reads the per-parse DOCTYPE-declared entity map (set
@@ -1193,26 +1241,15 @@ func buildXmlTagMatcher(
 ) tabnas.MakeLexMatcher {
 	_ = embed // embed flag is no longer needed for text-handling
 	return func(_ *tabnas.LexConfig, _ *tabnas.Options) tabnas.LexMatcher {
-		return func(lex *tabnas.Lex, _ *tabnas.Rule) *tabnas.Token {
-			pnt := lex.Cursor()
-			src := lex.Src
+		// scan decides what the text at sI is, changing nothing: the token
+		// or error there, how far the decision reached, and what a token
+		// tells the parse. src is the source, or in a parse from a reader a
+		// window at a time (Lex.Window, admin ADR-30) the window, and sI
+		// counts from its start. The matcher may scan again over a wider
+		// window, so the token is made, the cursor moved and the parse told
+		// only once the decision stands (takeCut).
+		scan := func(lex *tabnas.Lex, src string, sI int) xmlCut {
 			srclen := len(src)
-			sI := pnt.SI
-
-			// Strip a UTF-8 byte-order mark at the very start of input.
-			// The BOM is not part of the document, so skip it and carry
-			// on matching in this same call — returning nil here would
-			// hand control back to a lexer that has no other matcher
-			// enabled in pure mode, and the following `<?xml` would be
-			// reported as an unexpected character.
-			if sI == 0 && srclen >= 3 &&
-				src[0] == 0xef && src[1] == 0xbb && src[2] == 0xbf {
-				// The BOM occupies no display column, so only the source
-				// index advances; token positions stay aligned with the
-				// document text proper.
-				pnt.SI = 3
-				sI = 3
-			}
 
 			// Inside an open XML element (depth > 0), consume
 			// characters up to the next `<` as a single #TX text
@@ -1225,19 +1262,19 @@ func buildXmlTagMatcher(
 						i++
 					}
 					if i == sI {
-						return nil
+						return noCut(sI)
 					}
 					raw := src[sI:i]
 					if code := checkChars(raw); code != "" {
-						return lex.Bad(code)
+						return badAt(code, i)
 					}
 					if strings.Contains(raw, "]]>") {
-						return lex.Bad("cdata_terminator_in_text")
+						return badAt("cdata_terminator_in_text", i)
 					}
 					if code := checkEntityRefs(
 						raw, dtdEntities(lex), declared, strict,
 						entDeclState(lex), false); code != "" {
-						return lex.Bad(code)
+						return badAt(code, i)
 					}
 					// §2.11 end-of-line normalisation.
 					normalised := normaliseLineEndings(raw)
@@ -1245,37 +1282,32 @@ func buildXmlTagMatcher(
 					if entitiesOn {
 						val = decode(normalised, dtdEntities(lex))
 					}
-					tkn := lex.Token("#TX", tabnas.TinTX, val, raw)
-					advance(pnt, src, sI, i)
-					return tkn
+					return tokenCut("#TX", tabnas.TinTX, val, i)
 				}
 			}
 
 			if sI >= srclen || src[sI] != '<' {
-				return nil
+				return noCut(sI)
 			}
 
 			// Comment: <!-- ... -->
 			if strings.HasPrefix(src[sI:], "<!--") {
 				end := strings.Index(src[sI+4:], "-->")
 				if end < 0 {
-					return badSpan(lex, "unterminated_comment", sI, srclen)
+					return badCut("unterminated_comment", sI, srclen)
 				}
 				bodyStart := sI + 4
 				bodyEnd := bodyStart + end
 				body := src[bodyStart:bodyEnd]
+				finish := bodyEnd + 3
 				// WF: "--" must not occur in a comment body.
 				if strings.Contains(body, "--") {
-					return lex.Bad("comment_double_dash")
+					return badAt("comment_double_dash", finish)
 				}
 				if code := checkChars(body); code != "" {
-					return lex.Bad(code)
+					return badAt(code, finish)
 				}
-				finish := bodyEnd + 3
-				tsrc := src[sI:finish]
-				tkn := lex.Token("#XIG", xigTin, tsrc, tsrc)
-				advance(pnt, src, sI, finish)
-				return tkn
+				return tokenCut("#XIG", xigTin, src[sI:finish], finish)
 			}
 
 			// CDATA: <![CDATA[ ... ]]>
@@ -1283,18 +1315,15 @@ func buildXmlTagMatcher(
 				body := sI + 9
 				end := strings.Index(src[body:], "]]>")
 				if end < 0 {
-					return badSpan(lex, "unterminated_cdata", sI, srclen)
+					return badCut("unterminated_cdata", sI, srclen)
 				}
 				finish := body + end + 3
 				text := src[body : body+end]
 				if code := checkChars(text); code != "" {
-					return lex.Bad(code)
+					return badAt(code, finish)
 				}
-				tsrc := src[sI:finish]
 				// §2.11 line-end normalisation applies to CDATA too.
-				tkn := lex.Token("#TX", tabnas.TinTX, normaliseLineEndings(text), tsrc)
-				advance(pnt, src, sI, finish)
-				return tkn
+				return tokenCut("#TX", tabnas.TinTX, normaliseLineEndings(text), finish)
 			}
 
 			// DOCTYPE: <!DOCTYPE ... [...] > (allows a single level of [] subset)
@@ -1355,146 +1384,50 @@ func buildXmlTagMatcher(
 					i++
 				}
 				if i >= srclen {
-					return badSpan(lex, "unterminated_doctype", sI, srclen)
+					return badCut("unterminated_doctype", sI, srclen)
 				}
 				finish := i + 1
-				if lex.Ctx != nil {
-					if lex.Ctx.U == nil {
-						lex.Ctx.U = map[string]any{}
-					}
-
-					// XML 1.0 §4.1, WFC "Entity Declared": the constraint
-					// that a referenced entity be declared applies only
-					// when the processor has seen every declaration. If
-					// the DOCTYPE names an external subset — which we
-					// never fetch — then (unless the document declares
-					// `standalone="yes"`) an undeclared entity is NOT a
-					// well-formedness error. The head of the DOCTYPE is
-					// everything up to the internal subset's `[`, or up
-					// to the closing `>` when there is no internal
-					// subset.
-					headEnd := i
-					if subsetStart >= 0 {
-						headEnd = subsetStart - 1
-					}
-					if externalIDRE.MatchString(src[sI+9 : headEnd]) {
-						lex.Ctx.U["dtdUnread"] = true
-					}
+				// The head of the DOCTYPE is everything up to the internal
+				// subset's `[`, or up to the closing `>` when there is no
+				// internal subset.
+				headEnd := i
+				if subsetStart >= 0 {
+					headEnd = subsetStart - 1
 				}
-				// Extract internal-subset declarations and stash them
-				// on the per-parse context. The matcher's text /
-				// attribute paths and the element actions read these
-				// back via lex.Ctx.U.
-				if subsetStart >= 0 && subsetEnd > subsetStart && lex.Ctx != nil {
-					subset := src[subsetStart:subsetEnd]
-					if lex.Ctx.U == nil {
-						lex.Ctx.U = map[string]any{}
-					}
-
-					// A parameter-entity reference in the internal subset
-					// hides declarations from a non-validating processor
-					// just as an external subset does.
-					if peRefRE.MatchString(subset) {
-						lex.Ctx.U["dtdUnread"] = true
-					}
-
-					found := parseDoctypeEntities(subset)
-					if len(found.Internal) > 0 {
-						existing, _ := lex.Ctx.U["dtdEntities"].(map[string]string)
-						if existing == nil {
-							existing = map[string]string{}
-						}
-						for k, v := range found.Internal {
-							existing[k] = v
-						}
-						lex.Ctx.U["dtdEntities"] = existing
-					}
-					// Externally-declared general entities are declared
-					// (so a reference to one is well-formed) but
-					// unresolvable, so they are tracked apart from the
-					// expandable ones.
-					if len(found.External) > 0 {
-						existing, _ := lex.Ctx.U["dtdExternalEntities"].(map[string]string)
-						if existing == nil {
-							existing = map[string]string{}
-						}
-						for k, v := range found.External {
-							existing[k] = v
-						}
-						lex.Ctx.U["dtdExternalEntities"] = existing
-					}
-					if len(found.Unparsed) > 0 {
-						existing, _ := lex.Ctx.U["dtdUnparsedEntities"].(map[string]string)
-						if existing == nil {
-							existing = map[string]string{}
-						}
-						for k, v := range found.Unparsed {
-							existing[k] = v
-						}
-						lex.Ctx.U["dtdUnparsedEntities"] = existing
-					}
-					// Merged per element in declaration order: an attribute
-					// already declared keeps its place and takes the new
-					// value, and a new one goes last (ts/src/xml.ts merges
-					// with Object.assign, which orders them so).
-					if found := parseDoctypeAttlists(subset); len(found) > 0 {
-						existing, _ := lex.Ctx.U["dtdAttrDefaults"].(map[string]*tabnas.OrderedMap)
-						if existing == nil {
-							existing = map[string]*tabnas.OrderedMap{}
-						}
-						for elem, defs := range found {
-							if existing[elem] == nil {
-								existing[elem] = tabnas.NewOrderedMap()
-							}
-							for _, k := range defs.Keys {
-								existing[elem].Set(k, defs.Vals[k])
-							}
-						}
-						lex.Ctx.U["dtdAttrDefaults"] = existing
-					}
-				}
-				tsrc := src[sI:finish]
-				tkn := lex.Token("#XIG", xigTin, tsrc, tsrc)
-				advance(pnt, src, sI, finish)
-				return tkn
+				cut := tokenCut("#XIG", xigTin, src[sI:finish], finish)
+				cut.doctype = &doctypeSpan{headEnd: headEnd, subsetStart: subsetStart, subsetEnd: subsetEnd}
+				return cut
 			}
 
 			// Processing instruction: <? ... ?>
 			if sI+1 < srclen && src[sI+1] == '?' {
 				end := strings.Index(src[sI+2:], "?>")
 				if end < 0 {
-					return badSpan(lex, "unterminated_pi", sI, srclen)
+					return badCut("unterminated_pi", sI, srclen)
 				}
 				bodyEnd := sI + 2 + end
+				finish := bodyEnd + 2
 				// WF: PI target must be a Name.
 				target, after, ok := readName(src, sI+2)
 				if !ok || after > bodyEnd {
-					return lex.Bad("pi_target_invalid")
+					return badAt("pi_target_invalid", finish)
 				}
 				if after < bodyEnd && !isSpace(src[after]) {
-					return lex.Bad("pi_target_invalid")
+					return badAt("pi_target_invalid", finish)
 				}
 				if code := checkChars(src[sI+2 : bodyEnd]); code != "" {
-					return lex.Bad(code)
+					return badAt(code, finish)
 				}
+				cut := tokenCut("#XIG", xigTin, src[sI:finish], finish)
 				// The XML declaration's standalone document declaration
 				// (§2.9) decides whether the §4.1 "Entity Declared"
 				// constraint still applies when part of the DTD went
 				// unread — with `standalone="yes"` the document promises
 				// there is nothing relevant out there, so an undeclared
 				// entity is an error again.
-				if target == "xml" && lex.Ctx != nil &&
-					standaloneYesRE.MatchString(src[after:bodyEnd]) {
-					if lex.Ctx.U == nil {
-						lex.Ctx.U = map[string]any{}
-					}
-					lex.Ctx.U["xmlStandalone"] = true
-				}
-				finish := bodyEnd + 2
-				tsrc := src[sI:finish]
-				tkn := lex.Token("#XIG", xigTin, tsrc, tsrc)
-				advance(pnt, src, sI, finish)
-				return tkn
+				cut.standalone = target == "xml" &&
+					standaloneYesRE.MatchString(src[after:bodyEnd])
+				return cut
 			}
 
 			// Closing tag: </name>
@@ -1502,27 +1435,24 @@ func buildXmlTagMatcher(
 				name, after, ok := readName(src, sI+2)
 				// WF: empty close tag `</>` is invalid.
 				if !ok {
-					return badSpan(lex, "xml_invalid_tag", sI, minInt(srclen, sI+3))
+					return badCut("xml_invalid_tag", sI, minInt(srclen, sI+3))
 				}
 				i := after
 				for i < srclen && isSpace(src[i]) {
 					i++
 				}
 				if i >= srclen || src[i] != '>' {
-					return badSpan(lex, "xml_invalid_tag", sI, i+1)
+					return badCut("xml_invalid_tag", sI, i+1)
 				}
-				finish := i + 1
-				tsrc := src[sI:finish]
-				tkn := lex.Token("#XCL", xclTin, name, tsrc)
-				advance(pnt, src, sI, finish)
-				setXmlDepth(lex, xmlDepth(lex)-1)
-				return tkn
+				cut := tokenCut("#XCL", xclTin, name, i+1)
+				cut.depth = -1
+				return cut
 			}
 
 			// Opening or self-close tag: <name attr="v" ... />
 			name, after, ok := readName(src, sI+1)
 			if !ok {
-				return nil
+				return noCut(sI + 1)
 			}
 			i := after
 			// In source order: the token carries the attributes as the
@@ -1535,38 +1465,31 @@ func buildXmlTagMatcher(
 					i++
 				}
 				if i >= srclen {
-					return badSpan(lex, "xml_invalid_tag", sI, srclen)
+					return badCut("xml_invalid_tag", sI, srclen)
 				}
 
 				// End of tag.
 				if src[i] == '>' {
-					finish := i + 1
-					tsrc := src[sI:finish]
 					val := map[string]any{"name": name, "attributes": applyAttrDefaults(attrs, name, lex.Ctx)}
-					tkn := lex.Token("#XOP", xopTin, val, tsrc)
-					advance(pnt, src, sI, finish)
-					setXmlDepth(lex, xmlDepth(lex)+1)
-					return tkn
+					cut := tokenCut("#XOP", xopTin, val, i+1)
+					cut.depth = 1
+					return cut
 				}
 				if src[i] == '/' && i+1 < srclen && src[i+1] == '>' {
-					finish := i + 2
-					tsrc := src[sI:finish]
 					val := map[string]any{"name": name, "attributes": applyAttrDefaults(attrs, name, lex.Ctx)}
-					tkn := lex.Token("#XSC", xscTin, val, tsrc)
-					advance(pnt, src, sI, finish)
 					// #XSC is an instantly-closed element; depth unchanged.
-					return tkn
+					return tokenCut("#XSC", xscTin, val, i+2)
 				}
 
 				// Attributes must be separated by whitespace.
 				if wsStart == i {
-					return badSpan(lex, "xml_invalid_tag", sI, i+1)
+					return badCut("xml_invalid_tag", sI, i+1)
 				}
 
 				// Attribute name.
 				attrName, attrEnd, ok := readName(src, i)
 				if !ok {
-					return badSpan(lex, "xml_invalid_tag", sI, i+1)
+					return badCut("xml_invalid_tag", sI, i+1)
 				}
 				i = attrEnd
 
@@ -1574,7 +1497,7 @@ func buildXmlTagMatcher(
 					i++
 				}
 				if i >= srclen || src[i] != '=' {
-					return badSpan(lex, "xml_invalid_tag", sI, i+1)
+					return badCut("xml_invalid_tag", sI, i+1)
 				}
 				i++
 				for i < srclen && isSpace(src[i]) {
@@ -1582,11 +1505,11 @@ func buildXmlTagMatcher(
 				}
 
 				if i >= srclen {
-					return badSpan(lex, "xml_invalid_tag", sI, srclen)
+					return badCut("xml_invalid_tag", sI, srclen)
 				}
 				quote := src[i]
 				if quote != '"' && quote != '\'' {
-					return badSpan(lex, "xml_invalid_tag", sI, i+1)
+					return badCut("xml_invalid_tag", sI, i+1)
 				}
 				i++
 				valStart := i
@@ -1595,26 +1518,26 @@ func buildXmlTagMatcher(
 				// references in the value below.
 				for i < srclen && src[i] != quote {
 					if src[i] == '<' {
-						return lex.Bad("lt_in_attr_value")
+						return badAt("lt_in_attr_value", i+1)
 					}
 					i++
 				}
 				if i >= srclen {
-					return badSpan(lex, "xml_invalid_tag", sI, srclen)
+					return badCut("xml_invalid_tag", sI, srclen)
 				}
 				raw := src[valStart:i]
 				i++ // consume closing quote
 
 				if code := checkChars(raw); code != "" {
-					return lex.Bad(code)
+					return badAt(code, i)
 				}
 				if code := checkEntityRefs(
 					raw, dtdEntities(lex), declared, strict,
 					entDeclState(lex), true); code != "" {
-					return lex.Bad(code)
+					return badAt(code, i)
 				}
 				if attrs.Has(attrName) {
-					return lex.Bad("duplicate_attribute")
+					return badAt("duplicate_attribute", i)
 				}
 				// §3.3.3 attribute-value normalisation: TAB/LF/CR/CRLF
 				// all collapse to a single SPACE. Without DTD attribute
@@ -1624,6 +1547,261 @@ func buildXmlTagMatcher(
 				attrs.Set(attrName, decode(normalised, dtdEntities(lex)))
 			}
 		}
+
+		return func(lex *tabnas.Lex, _ *tabnas.Rule) *tabnas.Token {
+			pnt := lex.Cursor()
+
+			// In a parse from a reader a window at a time (Lex.Window,
+			// admin ADR-30), lex.Src is the window's text and the cursor
+			// counts from the window's start. The markers below are told
+			// apart by as many as nine bytes (`<!DOCTYPE`, `<![CDATA[`), so
+			// the window is read on until that many lie past the cursor, or
+			// the source ends.
+			windowed := lex.Windowed()
+			if windowed {
+				lex.Fill(markerReach)
+			}
+			src := lex.Src
+			sI := pnt.SI
+
+			// Strip a UTF-8 byte-order mark at the very start of input.
+			// The BOM is not part of the document, so skip it and carry
+			// on matching in this same call — returning nil here would
+			// hand control back to a lexer that has no other matcher
+			// enabled in pure mode, and the following `<?xml` would be
+			// reported as an unexpected character.
+			if sI == 0 && atSourceStart(lex) && len(src) >= 3 &&
+				src[0] == 0xef && src[1] == 0xbb && src[2] == 0xbf {
+				// The BOM occupies no display column, so only the source
+				// index advances; token positions stay aligned with the
+				// document text proper.
+				pnt.SI = 3
+				sI = 3
+				// The markers are told apart from past the mark.
+				if windowed {
+					lex.Fill(markerReach)
+					src = lex.Src
+				}
+			}
+
+			// A decision the scan reached at the window's end may not be
+			// the one the whole text gives, since the source may go on
+			// there: the window is read on, twice as far each time, and
+			// the text scanned again, until what decides it lies inside
+			// the window or the source has ended. A token also ends inside
+			// the window, as the engine cuts again a token that ends at its
+			// edge. In a parse of the whole text the first scan stands.
+			cut := scan(lex, src, sI)
+			for windowed && cut.stop >= len(src) {
+				held := len(src) - sI
+				more := lex.Fill(max(2*held, held+1))
+				src = lex.Src
+				cut = scan(lex, src, sI)
+				if !more {
+					break
+				}
+			}
+			return takeCut(lex, cut, src, sI)
+		}
+	}
+}
+
+// markerReach is the longest marker the XML matcher tells constructs
+// apart by: `<!DOCTYPE` and `<![CDATA[`, nine bytes.
+const markerReach = 9
+
+// atSourceStart reports whether a cursor at the start of the text the
+// lexer holds is at the source's start. In a parse of the whole text it
+// is. In a parse from a reader the cursor counts from the window's start,
+// and the window keeps the text from the oldest token the parser holds,
+// and from the end of the last one it does not ignore, so it begins at the
+// source's start until the parser has taken a token: one it then still
+// holds lies before a cursor at the window's start, and one it has
+// consumed is counted in Ctx.VAbs.
+func atSourceStart(lex *tabnas.Lex) bool {
+	return lex.Ctx == nil || lex.Ctx.VAbs == 0
+}
+
+// xmlCut is what the XML matcher's scan of the text at the cursor decided,
+// in byte positions of the text it scanned. stop is how far the decision
+// reached: a token's end, the end of an error's span, the last byte the
+// scan read to decide an error it reports at the cursor, or, where nothing
+// there is XML, the last byte it read.
+type xmlCut struct {
+	kind cutKind
+	stop int
+
+	// An error: its code, and the span of the source it covers when it
+	// has one (badSpan), else it is reported at the cursor (Lex.Bad).
+	code     string
+	span     bool
+	from, to int
+
+	// A token over [cursor, end): its name, tin and value, and what
+	// reading it tells the parse: the element depth it moves by, whether
+	// the XML declaration says standalone="yes", and where a DOCTYPE's
+	// head and internal subset lie.
+	name       string
+	tin        tabnas.Tin
+	val        any
+	end        int
+	depth      int
+	standalone bool
+	doctype    *doctypeSpan
+}
+
+type cutKind int
+
+const (
+	// Not XML here; the engine's own matchers have the cursor.
+	cutNone cutKind = iota
+	// A well-formedness error.
+	cutBad
+	// A token.
+	cutToken
+)
+
+// doctypeSpan is where a DOCTYPE's head ends and its internal subset lies
+// (-1 when it has none), in byte positions of the text scanned.
+type doctypeSpan struct {
+	headEnd, subsetStart, subsetEnd int
+}
+
+func noCut(stop int) xmlCut {
+	return xmlCut{kind: cutNone, stop: stop}
+}
+
+// badCut is an error over src[from:to], the error token's Src.
+func badCut(code string, from, to int) xmlCut {
+	return xmlCut{kind: cutBad, code: code, span: true, from: from, to: to, stop: to}
+}
+
+// badAt is an error reported at the cursor, decided by reading as far as
+// stop.
+func badAt(code string, stop int) xmlCut {
+	return xmlCut{kind: cutBad, code: code, stop: stop}
+}
+
+func tokenCut(name string, tin tabnas.Tin, val any, end int) xmlCut {
+	return xmlCut{kind: cutToken, name: name, tin: tin, val: val, end: end, stop: end}
+}
+
+// takeCut makes what a scan decided: nothing, the error token, or the
+// token, the cursor moved past it, and what it tells the parse recorded on
+// the per-parse context, where the matcher's text and attribute paths and
+// the element actions read it back.
+func takeCut(lex *tabnas.Lex, cut xmlCut, src string, sI int) *tabnas.Token {
+	switch cut.kind {
+	case cutNone:
+		return nil
+	case cutBad:
+		if cut.span {
+			return badSpan(lex, cut.code, cut.from, cut.to)
+		}
+		return lex.Bad(cut.code)
+	}
+	if lex.Ctx != nil {
+		if cut.doctype != nil {
+			readDoctype(lex.Ctx, src, sI, cut.doctype)
+		}
+		if cut.standalone {
+			if lex.Ctx.U == nil {
+				lex.Ctx.U = map[string]any{}
+			}
+			lex.Ctx.U["xmlStandalone"] = true
+		}
+	}
+	tkn := lex.Token(cut.name, cut.tin, cut.val, src[sI:cut.end])
+	advance(lex.Cursor(), src, sI, cut.end)
+	if cut.depth != 0 {
+		setXmlDepth(lex, xmlDepth(lex)+cut.depth)
+	}
+	return tkn
+}
+
+// readDoctype records what the DOCTYPE at src[sI:] declares on the
+// per-parse context, where the matcher's text and attribute paths and the
+// element actions read it back.
+func readDoctype(ctx *tabnas.Context, src string, sI int, span *doctypeSpan) {
+	if ctx.U == nil {
+		ctx.U = map[string]any{}
+	}
+
+	// XML 1.0 §4.1, WFC "Entity Declared": the constraint that a
+	// referenced entity be declared applies only when the processor has
+	// seen every declaration. If the DOCTYPE names an external subset —
+	// which we never fetch — then (unless the document declares
+	// `standalone="yes"`) an undeclared entity is NOT a well-formedness
+	// error.
+	if externalIDRE.MatchString(src[sI+9 : span.headEnd]) {
+		ctx.U["dtdUnread"] = true
+	}
+
+	// Extract internal-subset declarations and stash them on the per-parse
+	// context.
+	if span.subsetStart < 0 || span.subsetEnd <= span.subsetStart {
+		return
+	}
+	subset := src[span.subsetStart:span.subsetEnd]
+
+	// A parameter-entity reference in the internal subset hides
+	// declarations from a non-validating processor just as an external
+	// subset does.
+	if peRefRE.MatchString(subset) {
+		ctx.U["dtdUnread"] = true
+	}
+
+	found := parseDoctypeEntities(subset)
+	if len(found.Internal) > 0 {
+		existing, _ := ctx.U["dtdEntities"].(map[string]string)
+		if existing == nil {
+			existing = map[string]string{}
+		}
+		for k, v := range found.Internal {
+			existing[k] = v
+		}
+		ctx.U["dtdEntities"] = existing
+	}
+	// Externally-declared general entities are declared (so a reference to
+	// one is well-formed) but unresolvable, so they are tracked apart from
+	// the expandable ones.
+	if len(found.External) > 0 {
+		existing, _ := ctx.U["dtdExternalEntities"].(map[string]string)
+		if existing == nil {
+			existing = map[string]string{}
+		}
+		for k, v := range found.External {
+			existing[k] = v
+		}
+		ctx.U["dtdExternalEntities"] = existing
+	}
+	if len(found.Unparsed) > 0 {
+		existing, _ := ctx.U["dtdUnparsedEntities"].(map[string]string)
+		if existing == nil {
+			existing = map[string]string{}
+		}
+		for k, v := range found.Unparsed {
+			existing[k] = v
+		}
+		ctx.U["dtdUnparsedEntities"] = existing
+	}
+	// Merged per element in declaration order: an attribute already
+	// declared keeps its place and takes the new value, and a new one goes
+	// last (ts/src/xml.ts merges with Object.assign, which orders them so).
+	if found := parseDoctypeAttlists(subset); len(found) > 0 {
+		existing, _ := ctx.U["dtdAttrDefaults"].(map[string]*tabnas.OrderedMap)
+		if existing == nil {
+			existing = map[string]*tabnas.OrderedMap{}
+		}
+		for elem, defs := range found {
+			if existing[elem] == nil {
+				existing[elem] = tabnas.NewOrderedMap()
+			}
+			for _, k := range defs.Keys {
+				existing[elem].Set(k, defs.Vals[k])
+			}
+		}
+		ctx.U["dtdAttrDefaults"] = existing
 	}
 }
 

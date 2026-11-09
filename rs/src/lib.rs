@@ -1050,8 +1050,18 @@ pub fn plugin() -> Plugin {
 }
 
 /// Build an XML parser with caller options: the engine, then this
-/// plugin, the `new Tabnas().use(Xml, options)` of the canonical plugin
-/// and the `tabnas.Make()` plus `UseDefaults` of Go's C library.
+/// plugin, the `make(options)` of the canonical plugin (`new
+/// Tabnas().use(Xml, options)`) and the `Make(options)` of the Go port.
+///
+/// The parser reads a source from a reader a window at a time
+/// ([`Tabnas::parse_reader`], admin ADR-30) rather than whole: its tokens
+/// are the `xmltag` matcher's and the engine's own, and the matcher reads
+/// the source only through the lexer's window, reading it on where a
+/// construct runs past the window's end, so the parser declares
+/// `lex.window`. The option is set here, on the parser this crate makes
+/// whole, and not in [`xml`] or [`plugin`], which other grammars install
+/// beneath matchers of their own (feed) and embed mode installs on a
+/// jsonic parser.
 ///
 /// Infallible for every option but one: the grammar documents are fixed
 /// literals, so any other failure here is a bug in this crate rather than
@@ -1082,6 +1092,9 @@ pub fn make_with(options: &XmlOptions) -> Tabnas {
         // Embed mode, refused by `xml` on the bare engine; or a bug here.
         panic!("tabnas_xml::make_with: {error}");
     }
+    parser
+        .set_options(|options| options.lex.window = true)
+        .expect("lex.window sets");
     parser
 }
 

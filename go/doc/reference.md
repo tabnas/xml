@@ -27,6 +27,7 @@ import (
 | Symbol                | Kind                                              | Purpose                                          |
 | --------------------- | ------------------------------------------------- | ------------------------------------------------ |
 | `tabnasxml.Xml`             | `func(*tabnas.Tabnas, map[string]any) error`            | The plugin. Register with `UseDefaults`.         |
+| `tabnasxml.Make`            | `func(...map[string]any) (*tabnas.Tabnas, error)` | An XML parser that reads a reader a window at a time. |
 | `tabnasxml.Defaults`        | `map[string]any`                                  | Default option values to pass to `UseDefaults`.  |
 | `tabnasxml.DecodeBOM`       | `func(string) string`                             | Strip/transcode a byte-order mark before parse.  |
 | `tabnasxml.EntityDecoder`   | `func(string, map[string]string) string`          | The entity-decoder function type (advanced).     |
@@ -53,6 +54,51 @@ never panics.
 In the default (pure-XML) mode the result is the root element as a
 `map[string]any`. In embed mode the result is whatever the outer Jsonic
 document evaluates to (see [`embed`](#embed)). The instance is reusable.
+
+## `Make(options ...map[string]any) (*tabnas.Tabnas, error)`
+
+Builds the same parser as `tabnas.Make()` then `UseDefaults(Xml,
+Defaults, options)`, and declares the engine's `Lex.Window` option on
+it, so that `ParseReader` reads a source a window at a time rather than
+whole. [Reading from a reader](#reading-from-a-reader) has the details.
+`Make` merges more than one options map in order, a later key winning.
+`Parse` of a string gives what the parser without the option gives, and
+what the plugin gives on a jsonic engine. Embed mode needs a jsonic
+engine, so `Make` returns the plugin's error for it.
+
+```go
+j, err := tabnasxml.Make()
+if err != nil {
+	// embed mode, or a bug in this package
+}
+result, err := j.Parse(`<a x="1"/>`)
+```
+
+## Reading from a reader
+
+The engine's `ParseReader(r io.Reader)` and `ParseReaderMeta(r, meta)`
+parse a source read from `r`, its bytes decoded as UTF-8. The
+value and the errors are those of `Parse` of the same text, but for an
+error's excerpt of a very long line, which shows the line only as far
+back as the window reaches.
+
+On a parser from `Make`, the engine keeps a window of the source: the
+text from the oldest token the parser holds to some 64 KiB past the
+cursor. The plugin's matcher reads the text only through that window,
+and where a construct runs past the window's end, it reads the window on
+and scans again, so the window grows only as far as one token is long.
+A parser built with `UseDefaults` and no `Lex.Window` reads the reader
+whole first, then parses the text.
+
+```go
+f, err := os.Open("feed.xml")
+if err != nil {
+	return err
+}
+defer f.Close()
+j, _ := tabnasxml.Make()
+result, err := j.ParseReader(f)
+```
 
 ## `DecodeBOM(src string) string`
 

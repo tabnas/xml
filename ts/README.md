@@ -36,6 +36,11 @@ The result is an `XmlElement` tree: each element has `name`, `localName`,
 `attributes`, `children`, and (where they apply) `prefix`,
 `namespace`, `space`, and `lang`.
 
+`make()` builds the same parser and declares the engine's window option
+on it, so `parseReader` reads a document from a reader a window at a
+time rather than whole. The
+[reference](doc/reference.md#reading-from-a-reader) has the details.
+
 ## Documentation
 
 Organised by the [Diátaxis](https://diataxis.fr) framework:
