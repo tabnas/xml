@@ -60,13 +60,13 @@ options are fixed at `use` time.
 
 `make(options?: Partial<XmlOptions>): Tabnas`
 
-Builds the same parser, `new Tabnas().use(Xml, options)`, and declares
-the engine's `lex.window` option on it, so that `parseReader` reads a
-source a window at a time rather than whole (see
-[Reading from a reader](#reading-from-a-reader)). `parse` of a string
-gives what the parser without the option gives. Embed mode needs a
-jsonic engine, so `make({ embed: true })` throws, as `use` does on the
-bare engine.
+Builds the same parser as `new Tabnas().use(Xml, options)`, and
+declares the engine's `lex.window` option on it, so that `parseReader`
+reads a source a window at a time rather than whole.
+[Reading from a reader](#reading-from-a-reader) has the details. `parse`
+of a string gives what the parser without the option gives. Embed mode
+needs a jsonic engine, so `make({ embed: true })` throws, as `use` does
+on the bare engine.
 
 ```js
 const { make } = require('@tabnas/xml')
@@ -77,7 +77,7 @@ make().parse('<a x="1"/>')
 
 ## Reading from a reader
 
-`tn.parseReader(reader, meta?)` (an engine method) parses a source that a
+The engine's `tn.parseReader(reader, meta?)` parses a source that a
 synchronous reader hands over in bytes: an object whose `read(buf)`
 writes up to `buf.length` bytes into a `Uint8Array` and returns how many,
 `0` at the end, as `fs.readSync(fd, buf)` does. The value and the errors
@@ -88,11 +88,10 @@ back as the window reaches.
 On a parser from `make`, the engine keeps a window of the source: the
 text from the oldest token the parser holds to some 64 KiB past the
 cursor. The plugin's matcher reads the text only through that window,
-and where a construct runs past the window's end (a text run, a comment,
-a CDATA section, a processing instruction, a DOCTYPE, a tag) it reads
-the window on and scans again, so the window grows only as far as one
-token is long. A parser built with `use(Xml)` and no `lex.window`
-reads the reader whole first, then parses the text.
+and where a construct runs past the window's end, it reads the window on
+and scans again, so the window grows only as far as one token is long.
+A parser built with `use(Xml)` and no `lex.window` reads the reader
+whole first, then parses the text.
 
 ```js
 const { readSync, openSync } = require('node:fs')

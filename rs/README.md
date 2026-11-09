@@ -92,7 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-A UTF-8 document can be read from a reader instead. `make` and
+A parser can also read a UTF-8 document from a reader. `make` and
 `make_with` declare the engine's `lex.window` option, so
 `Tabnas::parse_reader` keeps a window of the source, from the oldest
 token the parser holds to some 64 KiB past the cursor, rather than the

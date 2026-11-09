@@ -38,8 +38,8 @@ The result is an `XmlElement` tree: each element has `name`, `localName`,
 
 `make()` builds the same parser and declares the engine's window option
 on it, so `parseReader` reads a document from a reader a window at a
-time rather than whole (see the
-[reference](doc/reference.md#reading-from-a-reader)).
+time rather than whole. The
+[reference](doc/reference.md#reading-from-a-reader) has the details.
 
 ## Documentation
 
