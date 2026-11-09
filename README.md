@@ -65,6 +65,15 @@ j.UseDefaults(tabnasxml.Xml, tabnasxml.Defaults)
 result, _ := j.Parse(`<greeting lang="en">Hi <b>world</b></greeting>`)
 ```
 
+**Reading from a reader.** `make()` in TypeScript, `Make()` in Go and
+`make()` in Rust build the same parser and declare the engine's window
+option, so a document read from a reader (`parseReader`, `ParseReader`,
+`parse_reader`) is held a window at a time, some 64 KiB past the cursor,
+rather than whole. The value and the errors are those of a parse of the
+same text. The [TypeScript](ts/doc/reference.md#reading-from-a-reader)
+and [Go](go/doc/reference.md#reading-from-a-reader) references and
+[`rs/README.md`](rs/README.md) have the details.
+
 ## Documentation
 
 Each language guide follows the [Diátaxis](https://diataxis.fr)

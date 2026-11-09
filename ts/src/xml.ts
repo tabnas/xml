@@ -1222,37 +1222,14 @@ function buildXmlTagMatcher(
   }
 
   return function makeXmlTagMatcher(_cfg: Config, _opts: TabnasOptions) {
-    return function xmlTagMatcher(lex: Lex) {
-      const { pnt, src } = lex
-      let sI = pnt.sI
-
-      // Strip a UTF-8 byte-order mark at the very start of input.
-      // After decoding, a UTF-8 BOM appears as a single U+FEFF
-      // character; some toolchains pass through the raw bytes
-      // (EF BB BF) as three separate Latin-1 code units. The BOM is
-      // not part of the document, so skip it and carry on matching in
-      // this same call — returning `undefined` here would hand control
-      // back to a lexer that has no other matcher enabled in pure
-      // mode, and the following `<?xml` would be reported as an
-      // unexpected character.
-      if (0 === sI && 0 < src.length) {
-        let bomLen = 0
-        if (0xfeff === src.charCodeAt(0)) {
-          bomLen = 1
-        } else if (3 <= src.length &&
-          0xef === src.charCodeAt(0) &&
-          0xbb === src.charCodeAt(1) &&
-          0xbf === src.charCodeAt(2)) {
-          bomLen = 3
-        }
-        if (0 < bomLen) {
-          // The BOM occupies no display column, so only the source
-          // index advances; token positions stay aligned with the
-          // document text proper.
-          pnt.sI = sI = bomLen
-        }
-      }
-
+    // Decide what the text at `sI` is, changing nothing: the token or error
+    // there, how far the decision reached, and what a token tells the parse.
+    // `src` is the source, or in a parse from a reader a window at a time
+    // (`lex.window`, admin ADR-30) the window, and `sI` counts from its
+    // start. The matcher may scan again over a wider window (see
+    // `xmlTagMatcher`), so the token is made, the cursor moved and the parse
+    // told only once the decision stands (`takeCut`).
+    function scanAt(lex: Lex, src: string, sI: number): XmlCut {
       // Inside an open XML element (depth > 0), consume characters up
       // to the next `<` as a single #TX text token so that Jsonic's
       // own matchers don't reinterpret commas/colons/etc. as JSON
@@ -1263,59 +1240,50 @@ function buildXmlTagMatcher(
         if (depth > 0) {
           let i = sI
           while (i < src.length && src[i] !== '<') i++
-          if (i === sI) return undefined
+          if (i === sI) return noCut(sI)
           const raw = src.substring(sI, i)
           const dtd = (lex.ctx?.u?.dtdEntities) || {}
           const result = processText(raw, dtd, entityDeclState(lex.ctx))
           if (result.err) {
-            return lex.bad(result.err, sI, i)
+            return badCut(result.err, sI, i)
           }
-          const tkn = lex.token('#TX', result.val, raw, pnt)
-          pnt.sI = i
-          pnt.cI += i - sI
-          return tkn
+          return tokenCut('#TX', result.val, i)
         }
       }
 
-      if (sI >= src.length || src[sI] !== '<') return undefined
+      if (sI >= src.length || src[sI] !== '<') return noCut(sI)
 
       // Comment: <!-- ... -->
       if (src.startsWith('<!--', sI)) {
         const endIdx = src.indexOf('-->', sI + 4)
         if (endIdx === -1) {
-          return lex.bad('unterminated_comment', sI, src.length)
+          return badCut('unterminated_comment', sI, src.length)
         }
         const body = src.substring(sI + 4, endIdx)
         // WF constraint: "--" must not occur in a comment body.
         if (body.indexOf('--') >= 0) {
-          return lex.bad('comment_double_dash', sI, endIdx + 3)
+          return badCut('comment_double_dash', sI, endIdx + 3)
         }
         if (checkChars(body)) {
-          return lex.bad('invalid_xml_char', sI, endIdx + 3)
+          return badCut('invalid_xml_char', sI, endIdx + 3)
         }
         const end = endIdx + 3
-        const tkn = lex.token('#XIG', src.substring(sI, end), src.substring(sI, end), pnt)
-        pnt.sI = end
-        pnt.cI += end - sI
-        return tkn
+        return tokenCut('#XIG', src.substring(sI, end), end)
       }
 
       // CDATA: <![CDATA[ ... ]]>
       if (src.startsWith('<![CDATA[', sI)) {
         const endIdx = src.indexOf(']]>', sI + 9)
         if (endIdx === -1) {
-          return lex.bad('unterminated_cdata', sI, src.length)
+          return badCut('unterminated_cdata', sI, src.length)
         }
         const end = endIdx + 3
         const text = src.substring(sI + 9, endIdx)
         if (checkChars(text)) {
-          return lex.bad('invalid_xml_char', sI, end)
+          return badCut('invalid_xml_char', sI, end)
         }
         // §2.11 line-end normalisation applies to CDATA too.
-        const tkn = lex.token('#TX', normaliseLineEndings(text), src.substring(sI, end), pnt)
-        pnt.sI = end
-        pnt.cI += end - sI
-        return tkn
+        return tokenCut('#TX', normaliseLineEndings(text), end)
       }
 
       // DOCTYPE: <!DOCTYPE ... [...] >
@@ -1360,106 +1328,50 @@ function buildXmlTagMatcher(
           i++
         }
         if (i >= src.length) {
-          return lex.bad('unterminated_doctype', sI, src.length)
+          return badCut('unterminated_doctype', sI, src.length)
         }
         const end = i + 1
-        if (lex.ctx) {
-          const u: any = lex.ctx.u || (lex.ctx.u = {})
-
-          // XML 1.0 §4.1, WFC "Entity Declared": the constraint that a
-          // referenced entity be declared applies only when the
-          // processor has seen every declaration. If the DOCTYPE names
-          // an external subset — which we never fetch — then (unless
-          // the document declares `standalone="yes"`) an undeclared
-          // entity is NOT a well-formedness error. The head of the
-          // DOCTYPE is everything up to the internal subset's `[`, or
-          // up to the closing `>` when there is no internal subset.
-          const headEnd = 0 <= subsetStart ? subsetStart - 1 : i
-          if (externalIDRE.test(src.substring(sI + 9, headEnd))) {
-            u.dtdUnread = true
-          }
-
-          // Extract internal-subset declarations and stash them on
-          // the per-parse context. The matcher's text/attribute paths
-          // and the element actions read these back via lex.ctx.u.
-          if (subsetStart >= 0 && subsetEnd > subsetStart) {
-            const subset = src.substring(subsetStart, subsetEnd)
-
-            // A parameter-entity reference in the internal subset hides
-            // declarations from a non-validating processor just as an
-            // external subset does.
-            if (peRefRE.test(subset)) {
-              u.dtdUnread = true
-            }
-
-            const ents = parseDoctypeEntities(subset)
-            if (Object.keys(ents.internal).length > 0) {
-              u.dtdEntities = Object.assign(
-                Object.create(null), u.dtdEntities || {}, ents.internal)
-            }
-            // Externally-declared general entities are declared (so a
-            // reference to one is well-formed) but unresolvable, so
-            // they are tracked apart from the expandable ones.
-            if (Object.keys(ents.external).length > 0) {
-              u.dtdExternalEntities = Object.assign(
-                Object.create(null), u.dtdExternalEntities || {}, ents.external)
-            }
-            if (Object.keys(ents.unparsed).length > 0) {
-              u.dtdUnparsedEntities = Object.assign(
-                Object.create(null), u.dtdUnparsedEntities || {}, ents.unparsed)
-            }
-            const atts = parseDoctypeAttlists(subset)
-            if (Object.keys(atts).length > 0) {
-              const merged: Record<string, any> =
-                Object.assign(Object.create(null), u.dtdAttrDefaults || {})
-              for (const elem of Object.keys(atts)) {
-                merged[elem] = Object.assign(
-                  Object.create(null), merged[elem] || {}, atts[elem])
-              }
-              u.dtdAttrDefaults = merged
-            }
-          }
-        }
-        const tkn = lex.token('#XIG', src.substring(sI, end), src.substring(sI, end), pnt)
-        pnt.sI = end
-        pnt.cI += end - sI
-        return tkn
+        return tokenCut('#XIG', src.substring(sI, end), end, {
+          doctype: {
+            // The head of the DOCTYPE is everything up to the internal
+            // subset's `[`, or up to the closing `>` when there is no
+            // internal subset.
+            headEnd: 0 <= subsetStart ? subsetStart - 1 : i,
+            subsetStart,
+            subsetEnd,
+          },
+        })
       }
 
       // Processing instruction: <? ... ?>
       if (src[sI + 1] === '?') {
         const endIdx = src.indexOf('?>', sI + 2)
         if (endIdx === -1) {
-          return lex.bad('unterminated_pi', sI, src.length)
+          return badCut('unterminated_pi', sI, src.length)
         }
         // WF constraint: PI target must be a Name (and not empty).
         const piTargetRes = readName(src, sI + 2)
         if (piTargetRes == null || piTargetRes.end > endIdx) {
-          return lex.bad('pi_target_invalid', sI, endIdx + 2)
+          return badCut('pi_target_invalid', sI, endIdx + 2)
         }
         const i = piTargetRes.end
         // After the target, only whitespace then content is allowed.
         if (i < endIdx && !isSpace(src[i])) {
-          return lex.bad('pi_target_invalid', sI, endIdx + 2)
+          return badCut('pi_target_invalid', sI, endIdx + 2)
         }
         if (checkChars(src.substring(sI + 2, endIdx))) {
-          return lex.bad('invalid_xml_char', sI, endIdx + 2)
-        }
-        // The XML declaration's standalone document declaration
-        // (§2.9) decides whether the §4.1 "Entity Declared" constraint
-        // still applies when part of the DTD went unread — with
-        // `standalone="yes"` the document promises there is nothing
-        // relevant out there, so an undeclared entity is an error again.
-        if ('xml' === piTargetRes.name && lex.ctx &&
-          standaloneYesRE.test(src.substring(i, endIdx))) {
-          const u: any = lex.ctx.u || (lex.ctx.u = {})
-          u.xmlStandalone = true
+          return badCut('invalid_xml_char', sI, endIdx + 2)
         }
         const end = endIdx + 2
-        const tkn = lex.token('#XIG', src.substring(sI, end), src.substring(sI, end), pnt)
-        pnt.sI = end
-        pnt.cI += end - sI
-        return tkn
+        return tokenCut('#XIG', src.substring(sI, end), end, {
+          // The XML declaration's standalone document declaration
+          // (§2.9) decides whether the §4.1 "Entity Declared" constraint
+          // still applies when part of the DTD went unread — with
+          // `standalone="yes"` the document promises there is nothing
+          // relevant out there, so an undeclared entity is an error again.
+          standalone: 'xml' === piTargetRes.name &&
+            standaloneYesRE.test(src.substring(i, endIdx)),
+        })
       }
 
       // Closing tag: </name>
@@ -1467,28 +1379,20 @@ function buildXmlTagMatcher(
         const nameRes = readName(src, sI + 2)
         // WF: empty close tag `</>` is invalid.
         if (nameRes == null) {
-          return lex.bad('xml_invalid_tag', sI, Math.min(src.length, sI + 3))
+          return badCut('xml_invalid_tag', sI, Math.min(src.length, sI + 3))
         }
         const name = nameRes.name
         let i = nameRes.end
         while (i < src.length && isSpace(src[i])) i++
         if (src[i] !== '>') {
-          return lex.bad('xml_invalid_tag', sI, i + 1)
+          return badCut('xml_invalid_tag', sI, i + 1)
         }
-        const end = i + 1
-        const tkn = lex.token('#XCL', name, src.substring(sI, end), pnt)
-        pnt.sI = end
-        pnt.cI += end - sI
-        if (lex.ctx) {
-          const u: any = lex.ctx.u || (lex.ctx.u = {})
-          u.xmlDepth = Math.max(0, (u.xmlDepth | 0) - 1)
-        }
-        return tkn
+        return tokenCut('#XCL', name, i + 1, { depth: -1 })
       }
 
       // Opening or self-close tag: <name attr="v" .../>
       const elemNameRes = readName(src, sI + 1)
-      if (elemNameRes == null) return undefined
+      if (elemNameRes == null) return noCut(sI + 1)
       const name = elemNameRes.name
       let i = elemNameRes.end
       // Keyed by attribute names the document controls: as a plain `{}` an
@@ -1500,50 +1404,38 @@ function buildXmlTagMatcher(
         const wsStart = i
         while (i < src.length && isSpace(src[i])) i++
         if (i >= src.length) {
-          return lex.bad('xml_invalid_tag', sI, src.length)
+          return badCut('xml_invalid_tag', sI, src.length)
         }
 
         if (src[i] === '>') {
-          const end = i + 1
-          const tkn = lex.token('#XOP', { name, attributes: applyAttrDefaults(attributes, name, lex.ctx) }, src.substring(sI, end), pnt)
-          pnt.sI = end
-          pnt.cI += end - sI
-          if (lex.ctx) {
-            const u: any = lex.ctx.u || (lex.ctx.u = {})
-            u.xmlDepth = (u.xmlDepth | 0) + 1
-          }
-          return tkn
+          return tokenCut('#XOP', { name, attributes: applyAttrDefaults(attributes, name, lex.ctx) }, i + 1, { depth: 1 })
         }
         if (src[i] === '/' && src[i + 1] === '>') {
-          const end = i + 2
-          const tkn = lex.token('#XSC', { name, attributes: applyAttrDefaults(attributes, name, lex.ctx) }, src.substring(sI, end), pnt)
-          pnt.sI = end
-          pnt.cI += end - sI
           // #XSC is an instantly-closed element, so depth is unchanged.
-          return tkn
+          return tokenCut('#XSC', { name, attributes: applyAttrDefaults(attributes, name, lex.ctx) }, i + 2)
         }
 
         if (wsStart === i) {
-          return lex.bad('xml_invalid_tag', sI, i + 1)
+          return badCut('xml_invalid_tag', sI, i + 1)
         }
 
         const attrNameRes = readName(src, i)
         if (attrNameRes == null) {
-          return lex.bad('xml_invalid_tag', sI, i + 1)
+          return badCut('xml_invalid_tag', sI, i + 1)
         }
         const attrName = attrNameRes.name
         i = attrNameRes.end
 
         while (i < src.length && isSpace(src[i])) i++
         if (src[i] !== '=') {
-          return lex.bad('xml_invalid_tag', sI, i + 1)
+          return badCut('xml_invalid_tag', sI, i + 1)
         }
         i++
         while (i < src.length && isSpace(src[i])) i++
 
         const quote = src[i]
         if (quote !== '"' && quote !== "'") {
-          return lex.bad('xml_invalid_tag', sI, i + 1)
+          return badCut('xml_invalid_tag', sI, i + 1)
         }
         i++
         const valStart = i
@@ -1552,28 +1444,28 @@ function buildXmlTagMatcher(
         // entity references in the value.
         while (i < src.length && src[i] !== quote) {
           if (src[i] === '<') {
-            return lex.bad('lt_in_attr_value', sI, i + 1)
+            return badCut('lt_in_attr_value', sI, i + 1)
           }
           i++
         }
         if (i >= src.length) {
-          return lex.bad('xml_invalid_tag', sI, src.length)
+          return badCut('xml_invalid_tag', sI, src.length)
         }
         const rawVal = src.substring(valStart, i)
         i++
 
         const charErr = checkChars(rawVal)
         if (charErr) {
-          return lex.bad(charErr, valStart, i)
+          return badCut(charErr, valStart, i)
         }
         const dtd = (lex.ctx?.u?.dtdEntities) || {}
         const ampErr = checkEntityRefs(
           rawVal, dtd, declared, strict, entityDeclState(lex.ctx), true)
         if (ampErr) {
-          return lex.bad(ampErr, valStart, i)
+          return badCut(ampErr, valStart, i)
         }
         if (Object.prototype.hasOwnProperty.call(attributes, attrName)) {
-          return lex.bad('duplicate_attribute', sI, i)
+          return badCut('duplicate_attribute', sI, i)
         }
         // §3.3.3 attribute-value normalisation: literal whitespace
         // (TAB, LF, CR, CRLF) becomes a single SPACE before any
@@ -1583,6 +1475,218 @@ function buildXmlTagMatcher(
         const normalised = normaliseAttrWhitespace(rawVal)
         attributes[attrName] = decodeEntity(normalised, dtd)
       }
+    }
+
+    return function xmlTagMatcher(lex: Lex) {
+      const pnt = lex.pnt
+
+      // In a parse from a reader a window at a time (`lex.window`, admin
+      // ADR-30), `lex.src` is the window's text and `pnt.sI` counts from
+      // the window's start. The markers below are told apart by as many
+      // as nine units (`<!DOCTYPE`, `<![CDATA[`), so the window is read on
+      // until that many lie past the cursor, or the source ends.
+      if (lex.windowed) lex.fill(MARKER_REACH)
+      let src = lex.src
+      let sI = pnt.sI
+
+      // Strip a UTF-8 byte-order mark at the very start of input.
+      // After decoding, a UTF-8 BOM appears as a single U+FEFF
+      // character; some toolchains pass through the raw bytes
+      // (EF BB BF) as three separate Latin-1 code units. The BOM is
+      // not part of the document, so skip it and carry on matching in
+      // this same call — returning `undefined` here would hand control
+      // back to a lexer that has no other matcher enabled in pure
+      // mode, and the following `<?xml` would be reported as an
+      // unexpected character. The start is the source's: a window
+      // begins `lengthRead() - src.length` units into the source, which
+      // is none in a parse of the whole text.
+      if (0 === lex.lengthRead() - src.length + sI && 0 < src.length) {
+        let bomLen = 0
+        if (0xfeff === src.charCodeAt(0)) {
+          bomLen = 1
+        } else if (3 <= src.length &&
+          0xef === src.charCodeAt(0) &&
+          0xbb === src.charCodeAt(1) &&
+          0xbf === src.charCodeAt(2)) {
+          bomLen = 3
+        }
+        if (0 < bomLen) {
+          // The BOM occupies no display column, so only the source
+          // index advances; token positions stay aligned with the
+          // document text proper.
+          pnt.sI = sI = bomLen
+          // The markers are told apart from past the mark.
+          if (lex.windowed) {
+            lex.fill(MARKER_REACH)
+            src = lex.src
+          }
+        }
+      }
+
+      // A decision the scan reached at the window's end may not be the
+      // one the whole text gives, since the source may go on there: the
+      // window is read on, twice as far each time, and the text scanned
+      // again, until what decides it lies inside the window or the source
+      // has ended. A token also ends inside the window, as the engine cuts
+      // again a token that ends at its edge. In a parse of the whole text
+      // the first scan stands.
+      let cut = scanAt(lex, src, sI)
+      while (src.length <= cut.stop && lex.windowOpen) {
+        const held = src.length - sI
+        lex.fill(Math.max(2 * held, held + 1))
+        src = lex.src
+        cut = scanAt(lex, src, sI)
+      }
+      return takeCut(lex, cut, src, sI)
+    }
+  }
+}
+
+// The longest marker the XML matcher tells constructs apart by:
+// `<!DOCTYPE` and `<![CDATA[`, nine units.
+const MARKER_REACH = 9
+
+// What the XML matcher's scan of the text at the cursor decided (see
+// `scanAt` in buildXmlTagMatcher), in positions of the text it scanned.
+// `stop` is how far the decision reached: a token's end, the end of an
+// error's span, or, where nothing there is XML, the last character the
+// scan read.
+//   none  - not XML here; the engine's own matchers have the cursor.
+//   bad   - a well-formedness error over [from, to).
+//   token - a token over [cursor, end) and its value, and what reading it
+//           tells the parse: the element depth it moves by, whether the
+//           XML declaration says `standalone="yes"`, and where a DOCTYPE's
+//           head and internal subset lie.
+type XmlCut =
+  | { kind: 'none'; stop: number }
+  | { kind: 'bad'; code: string; from: number; to: number; stop: number }
+  | {
+    kind: 'token'
+    name: string
+    val: any
+    end: number
+    stop: number
+    depth: number
+    standalone: boolean
+    doctype?: DoctypeSpan
+  }
+
+// Where a DOCTYPE's head ends and its internal subset lies (-1 when it
+// has none), in positions of the text scanned.
+type DoctypeSpan = {
+  headEnd: number
+  subsetStart: number
+  subsetEnd: number
+}
+
+function noCut(stop: number): XmlCut {
+  return { kind: 'none', stop }
+}
+
+function badCut(code: string, from: number, to: number): XmlCut {
+  return { kind: 'bad', code, from, to, stop: to }
+}
+
+function tokenCut(
+  name: string,
+  val: any,
+  end: number,
+  tells?: { depth?: number; standalone?: boolean; doctype?: DoctypeSpan },
+): XmlCut {
+  return {
+    kind: 'token',
+    name,
+    val,
+    end,
+    stop: end,
+    depth: tells?.depth || 0,
+    standalone: true === tells?.standalone,
+    doctype: tells?.doctype,
+  }
+}
+
+// Make what a scan decided: nothing, the error token, or the token, the
+// cursor moved past it, and what it tells the parse recorded on the
+// per-parse context, where the matcher's text and attribute paths and the
+// element actions read it back.
+function takeCut(lex: Lex, cut: XmlCut, src: string, sI: number) {
+  if ('none' === cut.kind) return undefined
+  if ('bad' === cut.kind) return lex.bad(cut.code, cut.from, cut.to)
+
+  if (lex.ctx && (0 !== cut.depth || cut.standalone || cut.doctype)) {
+    const u: any = lex.ctx.u || (lex.ctx.u = {})
+    if (1 === cut.depth) {
+      u.xmlDepth = (u.xmlDepth | 0) + 1
+    } else if (-1 === cut.depth) {
+      u.xmlDepth = Math.max(0, (u.xmlDepth | 0) - 1)
+    }
+    if (cut.standalone) {
+      u.xmlStandalone = true
+    }
+    if (cut.doctype) {
+      readDoctype(u, src, sI, cut.doctype)
+    }
+  }
+
+  const pnt = lex.pnt
+  const tkn = lex.token(cut.name, cut.val, src.substring(sI, cut.end), pnt)
+  pnt.sI = cut.end
+  pnt.cI += cut.end - sI
+  return tkn
+}
+
+// Record what a DOCTYPE at `sI` declares on the per-parse context `u`.
+function readDoctype(u: any, src: string, sI: number, span: DoctypeSpan) {
+  const { headEnd, subsetStart, subsetEnd } = span
+
+  // XML 1.0 §4.1, WFC "Entity Declared": the constraint that a
+  // referenced entity be declared applies only when the
+  // processor has seen every declaration. If the DOCTYPE names
+  // an external subset — which we never fetch — then (unless
+  // the document declares `standalone="yes"`) an undeclared
+  // entity is NOT a well-formedness error.
+  if (externalIDRE.test(src.substring(sI + 9, headEnd))) {
+    u.dtdUnread = true
+  }
+
+  // Extract internal-subset declarations and stash them on
+  // the per-parse context. The matcher's text/attribute paths
+  // and the element actions read these back via lex.ctx.u.
+  if (subsetStart >= 0 && subsetEnd > subsetStart) {
+    const subset = src.substring(subsetStart, subsetEnd)
+
+    // A parameter-entity reference in the internal subset hides
+    // declarations from a non-validating processor just as an
+    // external subset does.
+    if (peRefRE.test(subset)) {
+      u.dtdUnread = true
+    }
+
+    const ents = parseDoctypeEntities(subset)
+    if (Object.keys(ents.internal).length > 0) {
+      u.dtdEntities = Object.assign(
+        Object.create(null), u.dtdEntities || {}, ents.internal)
+    }
+    // Externally-declared general entities are declared (so a
+    // reference to one is well-formed) but unresolvable, so
+    // they are tracked apart from the expandable ones.
+    if (Object.keys(ents.external).length > 0) {
+      u.dtdExternalEntities = Object.assign(
+        Object.create(null), u.dtdExternalEntities || {}, ents.external)
+    }
+    if (Object.keys(ents.unparsed).length > 0) {
+      u.dtdUnparsedEntities = Object.assign(
+        Object.create(null), u.dtdUnparsedEntities || {}, ents.unparsed)
+    }
+    const atts = parseDoctypeAttlists(subset)
+    if (Object.keys(atts).length > 0) {
+      const merged: Record<string, any> =
+        Object.assign(Object.create(null), u.dtdAttrDefaults || {})
+      for (const elem of Object.keys(atts)) {
+        merged[elem] = Object.assign(
+          Object.create(null), merged[elem] || {}, atts[elem])
+      }
+      u.dtdAttrDefaults = merged
     }
   }
 }
@@ -1918,12 +2022,28 @@ Xml.defaults = {
   embed: false,
 } as XmlOptions
 
+// An XML parser: the engine with this plugin installed, `new
+// Tabnas().use(Xml, options)`, which reads a source from a reader a window
+// at a time (`tn.parseReader`, admin ADR-30) rather than whole. Its tokens
+// are the plugin's matcher's and the engine's own, and the matcher reads
+// the text only through the lexer's window, so the parser declares
+// `lex.window`. The option is set here, on the parser this package makes
+// whole, and not in `Xml`, which other grammars install beneath matchers
+// of their own (feed) and embed mode installs on a jsonic engine. Embed
+// mode needs that jsonic engine, so `make` refuses it, as `use` on the
+// bare engine does.
+function make(options?: Partial<XmlOptions>): Tabnas {
+  const tn = new Tabnas().use(Xml, options)
+  tn.options({ lex: { window: true } })
+  return tn
+}
+
 // VERSION is this package's version. It MUST equal package.json "version":
 // the release orchestrator rewrites both, and the version test fails the
 // build if they drift. Mirrors `const VERSION` in go/xml.go.
 const VERSION = '0.7.19'
 
-export { Xml, decodeBOM, VERSION }
+export { Xml, decodeBOM, make, VERSION }
 
 export type { XmlOptions, XmlElement }
 

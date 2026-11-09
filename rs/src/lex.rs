@@ -25,6 +25,17 @@
 //! standalone flag) lives on `Context::u`, exactly where `lex.ctx.u` and
 //! `lex.Ctx.U` keep it in the other two ports, so the rule actions in
 //! `lib.rs` read it from the same place.
+//!
+//! The matcher reads the source only through the lexer's window
+//! (`Lexer::window`), which is the whole source in a parse of a text and,
+//! in a parse from a reader a window at a time (`lex.window`, admin
+//! ADR-30), ends at the window's end. A scan ([`scan`]) decides what the
+//! text at the cursor is and changes nothing. Where its decision reached
+//! the window's end, the source may go on there, so the matcher reads the
+//! window on (`Lexer::fill`), twice as far each time, and scans again,
+//! until the decision lies inside the window or the source has ended; only
+//! then does it make the token, move the cursor and record what the token
+//! tells the parse ([`run`]).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -207,16 +218,20 @@ fn entity_decl_state(context: &Context) -> EntityDeclState {
     }
 }
 
-/// What one call of the matcher decided, in byte offsets from the cursor.
-/// The token or diagnostic is built afterwards, once the borrow of the
-/// remaining source has ended.
+/// What one scan of the text at the cursor decided, in byte offsets from
+/// the cursor. The scan changes nothing: the token or diagnostic is built,
+/// the cursor moved and the context told what the token says once the
+/// decision stands (see [`run`]), and after the borrow of the text has
+/// ended.
 enum Scan {
-    /// A token whose source is the next `end` bytes.
+    /// A token whose source is the next `end` bytes, and what it tells
+    /// the parse.
     Token {
         name: &'static str,
         tin: Tin,
         val: Value,
         end: usize,
+        tells: Tells,
     },
     /// A well-formedness error over the span `from..to`.
     Bad {
@@ -224,13 +239,50 @@ enum Scan {
         from: usize,
         to: usize,
     },
-    /// Not XML; let the engine's own matchers have the cursor.
-    NoMatch,
+    /// Not XML; let the engine's own matchers have the cursor. The scan
+    /// read up to the byte at `stop`.
+    NoMatch { stop: usize },
+}
+
+/// What reading a token tells the parse, recorded on the context once the
+/// matcher's decision stands.
+enum Tells {
+    Nothing,
+    /// The element depth moves by this much: an open tag, a close tag.
+    Depth(i64),
+    /// The XML declaration says `standalone="yes"`.
+    Standalone,
+    /// A DOCTYPE: where its head ends, and where its internal subset
+    /// starts and ends, in byte offsets from the cursor.
+    Doctype {
+        head_end: usize,
+        subset_start: Option<usize>,
+        subset_end: Option<usize>,
+    },
+}
+
+impl Scan {
+    /// How far the decision reached: a token's end, the end of an error's
+    /// span, or the byte a scan that found no XML read last. The decision
+    /// is the whole text's only when that lies inside the text scanned,
+    /// and a token must end inside it too, as the engine cuts again a
+    /// token that ends at a window's edge.
+    fn stop(&self) -> usize {
+        match self {
+            Scan::Token { end, .. } => *end,
+            Scan::Bad { to, .. } => *to,
+            Scan::NoMatch { stop } => *stop,
+        }
+    }
 }
 
 fn bad(code: &'static str, from: usize, to: usize) -> Scan {
     Scan::Bad { code, from, to }
 }
+
+/// The longest marker the matcher tells constructs apart by: `<!DOCTYPE`
+/// and `<![CDATA[`, nine characters.
+const MARKER_REACH: usize = 9;
 
 /// Build the `xmltag` matcher.
 pub(crate) fn matcher(state: Arc<MatcherState>) -> ImperativeLexMatcher {
@@ -242,12 +294,22 @@ pub(crate) fn matcher(state: Arc<MatcherState>) -> ImperativeLexMatcher {
 }
 
 fn run(state: &MatcherState, lexer: &mut Lexer<'_>, context: &mut Context) -> Option<Token> {
+    // In a parse from a reader a window at a time (`lex.window`, admin
+    // ADR-30), the text the lexer holds ends at the window's end, and the
+    // matcher reads it through `Lexer::window`. The markers below are told
+    // apart by as many as nine characters, so the window is read on until
+    // that many lie past the cursor, or the source ends.
+    let windowed = lexer.windowed();
+    if windowed {
+        lexer.fill(MARKER_REACH);
+    }
+
     // Strip a byte-order mark at the very start of the input. The mark is
     // not part of the document, so it is skipped and matching carries on
     // in this same call: handing the cursor back here would leave a
     // lexer with no other matcher enabled in pure mode, and the `<?xml`
     // that follows would be reported as an unexpected character.
-    if lexer.point().site.pos == 0 && lexer.remaining().starts_with('\u{FEFF}') {
+    if lexer.point().site.pos == 0 && lexer.window().starts_with('\u{FEFF}') {
         let row = lexer.point().site.ri;
         lexer.advance_chars(1);
         // The engine charges a display column for every character the
@@ -260,13 +322,31 @@ fn run(state: &MatcherState, lexer: &mut Lexer<'_>, context: &mut Context) -> Op
         context
             .u
             .insert(BOM_ROW.to_string(), Value::Number(row as f64));
+        // The markers are told apart from past the mark.
+        if windowed {
+            lexer.fill(MARKER_REACH);
+        }
     }
 
-    let scan = scan(state, context, lexer.remaining());
-    match scan {
-        Scan::NoMatch => None,
+    // A decision the scan reached at the window's end may not be the one
+    // the whole text gives, since the source may go on there: the window
+    // is read on, twice as far each time, and the text scanned again,
+    // until what decides it lies inside the window or the source has
+    // ended. In a parse of the whole text the first scan stands.
+    let mut decided = scan(state, context, lexer.window());
+    while windowed && decided.stop() >= lexer.window().len() {
+        let held = lexer.window().chars().count();
+        let more = lexer.fill(held.saturating_mul(2).max(held + 1));
+        decided = scan(state, context, lexer.window());
+        if !more {
+            break;
+        }
+    }
+
+    match decided {
+        Scan::NoMatch { .. } => None,
         Scan::Bad { code, from, to } => {
-            let rest = lexer.remaining();
+            let rest = lexer.window();
             let base = lexer.point().site.pos;
             let to = to.min(rest.len());
             let start = base + rest[..from].chars().count();
@@ -280,14 +360,34 @@ fn run(state: &MatcherState, lexer: &mut Lexer<'_>, context: &mut Context) -> Op
             tin,
             val,
             end,
+            tells,
         } => {
-            let source = lexer.remaining()[..end].to_string();
+            let source = lexer.window()[..end].to_string();
+            tell(context, &source, tells);
             let mut point = lexer.point();
             discount_bom(context, &mut point.site);
             let token = lexer.token(name, tin, val, source.as_str(), point);
             lexer.advance_chars(source.chars().count());
             Some(token)
         }
+    }
+}
+
+/// Record on the context what a token tells the parse: the element depth,
+/// the standalone declaration, and what a DOCTYPE declares, which the
+/// text, attribute and element paths read back. `source` is the token's.
+fn tell(context: &mut Context, source: &str, tells: Tells) {
+    match tells {
+        Tells::Nothing => {}
+        Tells::Depth(by) => set_depth(context, depth(context) + by),
+        Tells::Standalone => {
+            context.u.insert(STANDALONE.to_string(), Value::Bool(true));
+        }
+        Tells::Doctype {
+            head_end,
+            subset_start,
+            subset_end,
+        } => read_doctype(context, source, head_end, subset_start, subset_end),
     }
 }
 
@@ -324,10 +424,13 @@ fn process_text(
     })
 }
 
-fn scan(state: &MatcherState, context: &mut Context, rest: &str) -> Scan {
+/// Decide what the text at the cursor is, changing nothing. `rest` is the
+/// text from the cursor to the end of what the lexer holds: the source,
+/// or in a parse from a reader the window.
+fn scan(state: &MatcherState, context: &Context, rest: &str) -> Scan {
     let bytes = rest.as_bytes();
     let Some(&first) = bytes.first() else {
-        return Scan::NoMatch;
+        return Scan::NoMatch { stop: 0 };
     };
 
     // Inside an open element, the characters up to the next `<` are one
@@ -343,11 +446,12 @@ fn scan(state: &MatcherState, context: &mut Context, rest: &str) -> Scan {
                     tin: TIN_TX,
                     val: Value::String(text),
                     end,
+                    tells: Tells::Nothing,
                 },
                 Err(code) => bad(code, 0, end),
             };
         }
-        return Scan::NoMatch;
+        return Scan::NoMatch { stop: 0 };
     }
 
     // Comment: <!-- ... -->
@@ -364,7 +468,7 @@ fn scan(state: &MatcherState, context: &mut Context, rest: &str) -> Scan {
         if check_chars(body).is_some() {
             return bad("invalid_xml_char", 0, end);
         }
-        return ignored(state, rest, end);
+        return ignored(state, rest, end, Tells::Nothing);
     }
 
     // CDATA: <![CDATA[ ... ]]>
@@ -383,12 +487,13 @@ fn scan(state: &MatcherState, context: &mut Context, rest: &str) -> Scan {
             tin: TIN_TX,
             val: Value::String(normalise_line_endings(text).into_owned()),
             end,
+            tells: Tells::Nothing,
         };
     }
 
     // DOCTYPE: <!DOCTYPE ... [ ... ] >
     if rest.starts_with("<!DOCTYPE") {
-        return scan_doctype(state, context, rest);
+        return scan_doctype(state, rest);
     }
 
     // Processing instruction: <? ... ?>
@@ -415,10 +520,13 @@ fn scan(state: &MatcherState, context: &mut Context, rest: &str) -> Scan {
         // The XML declaration's standalone document declaration (2.9)
         // decides whether the 4.1 "Entity Declared" constraint still
         // applies when part of the DTD went unread.
-        if target == "xml" && standalone_yes_pattern().is_match(&rest[after..body_end]) {
-            context.u.insert(STANDALONE.to_string(), Value::Bool(true));
-        }
-        return ignored(state, rest, end);
+        let tells = if target == "xml" && standalone_yes_pattern().is_match(&rest[after..body_end])
+        {
+            Tells::Standalone
+        } else {
+            Tells::Nothing
+        };
+        return ignored(state, rest, end, tells);
     }
 
     // Closing tag: </name>
@@ -434,20 +542,19 @@ fn scan(state: &MatcherState, context: &mut Context, rest: &str) -> Scan {
         if i >= bytes.len() || bytes[i] != b'>' {
             return bad("xml_invalid_tag", 0, after_char(rest, i));
         }
-        let end = i + 1;
-        set_depth(context, depth(context) - 1);
         return Scan::Token {
             name: "#XCL",
             tin: state.tokens.xcl,
             val: Value::String(name.to_string()),
-            end,
+            end: i + 1,
+            tells: Tells::Depth(-1),
         };
     }
 
     // Opening or self-closing tag: <name attr="v" ... /> . A `<` that
     // starts no Name is not XML markup at all; the engine reports it.
     let Some((name, after)) = read_name(rest, 1) else {
-        return Scan::NoMatch;
+        return Scan::NoMatch { stop: 1 };
     };
     let mut attributes: IndexMap<String, Value> = IndexMap::new();
     let mut i = after;
@@ -464,12 +571,12 @@ fn scan(state: &MatcherState, context: &mut Context, rest: &str) -> Scan {
             if depth(context) >= DEPTH_LIMIT {
                 return bad("cancel", 0, i + 1);
             }
-            set_depth(context, depth(context) + 1);
             return Scan::Token {
                 name: "#XOP",
                 tin: state.tokens.xop,
                 val: tag_value(name, with_attr_defaults(attributes, name, context)),
                 end: i + 1,
+                tells: Tells::Depth(1),
             };
         }
         if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'>') {
@@ -479,6 +586,7 @@ fn scan(state: &MatcherState, context: &mut Context, rest: &str) -> Scan {
                 tin: state.tokens.xsc,
                 val: tag_value(name, with_attr_defaults(attributes, name, context)),
                 end: i + 2,
+                tells: Tells::Nothing,
             };
         }
 
@@ -585,19 +693,20 @@ fn tag_value(name: &str, attributes: IndexMap<String, Value>) -> Value {
 
 /// An `#XIG` token over the next `end` bytes, carrying its source as its
 /// value, as the canonical matcher does.
-fn ignored(state: &MatcherState, rest: &str, end: usize) -> Scan {
+fn ignored(state: &MatcherState, rest: &str, end: usize, tells: Tells) -> Scan {
     Scan::Token {
         name: "#XIG",
         tin: state.tokens.xig,
         val: Value::String(rest[..end].to_string()),
         end,
+        tells,
     }
 }
 
-/// `<!DOCTYPE ... [ ... ] >`: find its end, then mine the internal subset
-/// for entity and ATTLIST declarations and stash them on the parse
-/// context for the text, attribute and element paths to read back.
-fn scan_doctype(state: &MatcherState, context: &mut Context, rest: &str) -> Scan {
+/// `<!DOCTYPE ... [ ... ] >`: find its end, and where its head ends and its
+/// internal subset lies, which [`read_doctype`] mines once the decision
+/// stands.
+fn scan_doctype(state: &MatcherState, rest: &str) -> Scan {
     let bytes = rest.as_bytes();
     let mut i = 9;
     let mut nesting = 0i32;
@@ -653,21 +762,43 @@ fn scan_doctype(state: &MatcherState, context: &mut Context, rest: &str) -> Scan
         return bad("unterminated_doctype", 0, rest.len());
     }
     let end = i + 1;
+    // The head is everything up to the internal subset's `[`, or up to the
+    // closing `>` when there is no internal subset.
+    let head_end = subset_start.map_or(i, |start| start - 1);
+    ignored(
+        state,
+        rest,
+        end,
+        Tells::Doctype {
+            head_end,
+            subset_start,
+            subset_end,
+        },
+    )
+}
 
+/// Mine a DOCTYPE's internal subset for entity and ATTLIST declarations
+/// and stash them on the parse context for the text, attribute and element
+/// paths to read back. `source` is the DOCTYPE's, and the offsets are in
+/// it, as [`scan_doctype`] found them.
+fn read_doctype(
+    context: &mut Context,
+    source: &str,
+    head_end: usize,
+    subset_start: Option<usize>,
+    subset_end: Option<usize>,
+) {
     // XML 1.0 4.1, WFC "Entity Declared": the constraint that a referenced
     // entity be declared applies only when the processor has seen every
     // declaration. A DOCTYPE naming an external subset, which is never
-    // fetched, suspends it unless the document is `standalone="yes"`. The
-    // head is everything up to the internal subset's `[`, or up to the
-    // closing `>` when there is no internal subset.
-    let head_end = subset_start.map_or(i, |start| start - 1);
-    if external_id_pattern().is_match(&rest[9..head_end]) {
+    // fetched, suspends it unless the document is `standalone="yes"`.
+    if external_id_pattern().is_match(&source[9..head_end]) {
         context.u.insert(DTD_UNREAD.to_string(), Value::Bool(true));
     }
 
     if let (Some(start), Some(stop)) = (subset_start, subset_end) {
         if stop > start {
-            let subset = &rest[start..stop];
+            let subset = &source[start..stop];
             // A parameter-entity reference in the internal subset hides
             // declarations from a non-validating processor just as an
             // external subset does.
@@ -700,5 +831,4 @@ fn scan_doctype(state: &MatcherState, context: &mut Context, rest: &str) -> Scan
             }
         }
     }
-    ignored(state, rest, end)
 }

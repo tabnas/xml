@@ -274,17 +274,91 @@ no-op, not wrong. The tests: `derived-instances` in `ts/test/xml.test.ts`,
 `go/derive_test.go`, and `derive_keeps_the_xml_options` in
 `rs/tests/xml_test.rs`.
 
+## Reading a source from a reader
+
+**The parser this package makes whole reads a reader a window at a time**
+(admin ADR-30; tabnas/parser's `doc/chunked-source.md`). `make()` in
+TypeScript, `Make()` in Go and `make()` and `make_with()` in Rust build
+the pure-XML parser, the bare engine with the plugin as
+`new Tabnas().use(Xml)` builds it, and declare the engine's `lex.window`
+option on it, so `tn.parseReader`, `ParseReader` and `parse_reader` hold
+the text from the oldest token the parser holds to some 64 KiB past the
+cursor, not the whole source. The option is declared there and never in
+the plugin function (`Xml`, `xml`, `plugin`): feed installs the plugin
+beneath conversion actions of its own and declares the window on its own
+parser once those are verified, and embed mode installs it on a jsonic
+engine, whose constructor declares no window. Go's `Make` builds on the
+bare engine, as the other two do and as the C library does, where the Go
+suite builds the fixtures' parsers on a jsonic engine;
+`TestMakeParsesAsAJsonicEngineDoes` holds the two to the same value or
+error over every fixture row and every conformance document.
+
+**The matcher reads the text only through the window.** While a token is
+cut, the text it reads is the window's: `lex.src`, with `pnt.sI`
+counting from the window's start, in TypeScript; `Lex.Src` and
+`Cursor().SI` in Go; `Lexer::window()` in Rust. Each port splits the
+matcher in two:
+
+- a scan (`scanAt`, `scan`) that decides what the text at the cursor is
+  and changes nothing: a token and what it tells the parse (the element
+  depth, an XML declaration's `standalone="yes"`, where a DOCTYPE's
+  declarations lie), an error and its span, or nothing; with how far the
+  decision reached (`stop`: the token's end, the end of the error's span,
+  or the last character read where nothing there is XML);
+- a driver that, where the decision reached the window's end while the
+  source may go on, reads the window on (`fill`, `Fill`), twice as far
+  each time, and scans again, until the decision lies inside the window
+  or the source has ended; only then does it make the token, move the
+  cursor and record what the token tells the parse (`takeCut`, `tell`).
+
+A token never ends at the window's edge, because the engine cuts again a
+token that ends there, and a matcher's side effects would then repeat.
+Before it scans, the matcher reads the window on until nine characters
+lie past the cursor, the longest marker it tells constructs apart by
+(`<!DOCTYPE`, `<![CDATA[`). The window grows only as far as one token is
+long: a text run, comment, CDATA section, PI, DOCTYPE or tag longer than
+the margin costs its own length, and a token shorter than the margin is
+decided in one scan. A byte order mark is dropped only at the source's
+start, which in a window is not where the cursor counts from: TypeScript
+reads where the window begins (`lengthRead() - src.length`), Go asks
+whether the parser has consumed a token yet (`Ctx.VAbs`, see
+`atSourceStart`), and Rust's positions are the source's already. In a
+parse of a whole text the first scan stands, so a whole text parses as
+it always did.
+
+**The tests**: `ts/test/window.test.ts`, `go/window_test.go` and
+`rs/tests/window_test.rs` parse every fixture row and every `.xml`
+document of the W3C corpus whole and from a reader that hands its bytes
+over in pieces of 1, 3 and 64 bytes, and long documents whose tokens of
+every kind are longer than the window in pieces up to 64 KiB. TypeScript
+and Rust also read through windows of a few characters (margin and block
+1 and 1, 3 and 2, 64 and 64, through the engine's hidden
+`parseReaderWithSizes` and `parse_reader_with_sizes`), which Go cannot
+set. The value, the tokens, the rule passes, and an error's code,
+position, row, column and token must be the same. An error's excerpt is
+not compared: a parse from a reader shows a long line only as far back
+as the window reaches (tabnas/parser's `DIVERGENCE.md`).
+
+The engine issues they met, each tabnas/parser's to repair:
+tabnas/parser#321 (Go copies its window at each read, so a read of a few
+bytes costs the window's length; the Go suite reads its larger
+conformance documents in larger pieces), tabnas/parser#322 (Rust panics
+when the window drops all it holds and holds a character past ASCII: a
+document of comments alone past 64 KiB, or `rewind.history` 0, fails
+with `internal` from a reader) and tabnas/parser#323 (Go's `ParseReader`
+gives a parse no metadata map; the plugin's prepare hook makes one).
+
 ## Repository map
 
 | Path | What it is |
 |---|---|
-| [`ts/`](ts/) | **Canonical** TypeScript implementation — the `@tabnas/xml` package. Plugin source in [`ts/src/xml.ts`](ts/src/xml.ts) (single file). Exports `Xml`, `decodeBOM`, `VERSION`, and the `XmlOptions` / `XmlElement` types. |
+| [`ts/`](ts/) | **Canonical** TypeScript implementation — the `@tabnas/xml` package. Plugin source in [`ts/src/xml.ts`](ts/src/xml.ts) (single file). Exports `Xml`, `make`, `decodeBOM`, `VERSION`, and the `XmlOptions` / `XmlElement` types. |
 | [`xml-grammar.jsonic`](xml-grammar.jsonic) | The grammar definition, authored in jsonic syntax, at the **repo root** (not under `ts/`). `ts/embed-grammar.js` (`npm run embed`) reads it with `@tabnas/jsonic`, at build time, and writes it into `src/xml.ts` as JSON, between `// --- BEGIN/END EMBEDDED xml-grammar.jsonic ---` markers, as a `grammarJson` template literal the plugin reads with `JSON.parse`. So no runtime loads jsonic. The output is deterministic (`JSON.stringify`, two-space indent, LF; `.gitattributes` pins `ts/src/xml.ts` to `eol=lf`), and `ts/test/grammar-json.test.ts` regenerates it and fails when the committed copy is stale, so the script is deliberately NOT part of `npm run build`: a build that rewrote the JSON would make that test compare the script with itself. Edit the `.jsonic` file, run `npm run embed`, and commit both. The Rust crate carries the same JSON in `rs/src/lib.rs` between the same markers, by hand (byte for byte what the script writes today); `embed-grammar.js` does not write it, and `rs/tests/xml_test.rs` holds the two to the same value. |
 | [`tabnas.plugin.json`](tabnas.plugin.json) | Machine-readable plugin descriptor — name, base, grammar, extensions, error codes. Consumed by agent tooling. It deliberately carries **no version**: `versionSource` names `ts/package.json` instead, so this file cannot become a fourth place for the version to drift. Keep `errorCodes` in step with the `error` table in `ts/src/xml.ts`. Its `translate` object names the render and the embedding below, the schema of the tree XML's events carry (`xml-element`) and the root the render takes (`any`), with the loss lines a host prints. |
 | [`alchemy/render.alc`](alchemy/render.alc) | **XML's render**, an [alchemy](https://github.com/tabnas/alchemy) library whose entry point `xml-render` writes an element tree's events, the shape the reader builds, as one XML document, and refuses any other tree with the reason, as it refuses one that holds what no XML document can: a text or an attribute value with a character outside XML's `Char` production, and an element or attribute name that is empty or holds a character outside `NameChar`. Every definition is named `xml-...`. The Rust crate embeds it and the manifest as `render_text()` and `manifest_text()` from its own copies in `rs/translate/`: change the root file, then copy it there; `rs/tests/translate_test.rs` holds the two together. The round trip that runs the render (every fixture read, written and read back) needs alchemy, which this repository does not depend on, so it runs in the host's suite. |
 | [`alchemy/transduce.alc`](alchemy/transduce.alc) | **XML's transducer part**, an alchemy library whose entry point `xml-transduce` gives the document's JSON events from the grammar's rule passes, for a host that reads parser events (alchemy-cli's `translate` and `run --grammar xml`): each element's object from its start tag's token (name, localName, then its attributes when `head` opens), its children in document order (a text from the token a `child` opens on), and at its close the members after children (prefix, namespace, space, lang), resolved against the open elements' attributes as the grammar resolves them; a self-closing element, which has no `head`, leaves its closing items to the pass that follows. Every event is the walk of the grammar's value under its default options, and the passes show the whole value, the `<!ATTLIST>` defaults among them since the lexer applies them; the file's header states every rule. `npm run embed` copies it, with the manifest, into `go/translate/` and `rs/translate/` and into `ts/src/translate.ts`; each runtime's `translate()` carries it under the entry `xml-transduce`, and `rs/tests/translate_test.rs`, `go/translate_test.go` and `ts/test/translate.test.ts` hold the copies to the file. |
 | [`alchemy/embed.alc`](alchemy/embed.alc) | **XML's embedding**, an alchemy library beside the render: `xml-embed` takes any plain tree's events to an element tree's, and `xml-unembed` takes them back. The root value is the element `document`; an object is an element of `type="object"` whose members are `member` elements, each with a `name` attribute holding its key; an array is one of `type="array"` whose elements are `item` elements; a string is its element's text, and the other scalars are text typed `number`, `boolean`, `null`, or `string` for the empty string. A string XML cannot carry (one holding a character outside its `Char` production, U+0000 say) is its double-quoted JSON form, in an element of `type="string"` with `encoding="json"`, and a key XML cannot carry is that form in `name`, with `name-encoding="json"`. The reverse reads both back with alchemy's `unquoted`, and a number back as the number, its lexeme kept, with alchemy's `number`. The file's header states every rule, and what the reverse refuses. Every definition is named `xml-...`. `npm run embed` copies it, with the render and the manifest, into `go/translate/` and `rs/translate/` and into `ts/src/translate.ts`; `rs/tests/translate_test.rs`, `go/translate_test.go` and `ts/test/translate.test.ts` hold the copies to the file. |
-| [`go/`](go/) | Go port — `github.com/tabnas/xml/go`. Plugin in [`go/xml.go`](go/xml.go) (single file); `const VERSION` lives there. Exports the `Xml` plugin func, a `Defaults` options map and `VERSION`. |
+| [`go/`](go/) | Go port — `github.com/tabnas/xml/go`. Plugin in [`go/xml.go`](go/xml.go) (single file); `const VERSION` lives there. Exports the `Xml` plugin func, a `Defaults` options map, `Make` and `VERSION`. |
 | [`rs/`](rs/) | Rust port — crate `tabnas-xml`, library `tabnas_xml`. `src/lib.rs` holds `XmlOptions`, the embedded grammar and the typed `@ref` registrations; `src/lex.rs`, `src/entity.rs`, `src/namespace.rs` and `src/bom.rs` hold the matcher, the entity and name machinery, prefix resolution and `decode_bom`. Exports `xml`, `plugin`, `make`, `make_with`, `parse`, `decode_bom`, `strip_bom` and `VERSION`. On crates.io: the release workflow publishes it, swapping the path dependency for a crates.io version, while the committed manifest stays path-only. See [`rs/AGENTS.md`](rs/AGENTS.md). |
 | [`test/spec/`](test/spec/) | Shared `.tsv` conformance fixtures. **All three** runners auto-discover and run every file in the directory, so adding one covers TypeScript, Go and Rust together. See [`test/AGENTS.md`](test/AGENTS.md). |
 | [`ts/doc/grammar.svg`](ts/doc/grammar.svg), [`ts/doc/grammar.txt`](ts/doc/grammar.txt) | Railroad / ASCII diagram of the live grammar (generated by `@tabnas/railroad`). |
@@ -504,6 +578,9 @@ token names shown in `ts/doc/grammar.svg`.
   installed parser carries.
 - `go/xmlconf_test.go` and `ts/test/xmlconf.test.ts` — the W3C XML
   Conformance Test Suite. See below.
+- `ts/test/window.test.ts`, `go/window_test.go` and
+  `rs/tests/window_test.rs` — a parse from a reader against the same text
+  parsed whole (see "Reading a source from a reader").
 
 ### The W3C conformance suites
 

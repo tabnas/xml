@@ -122,7 +122,7 @@ func TestParserDeclaresElementFieldOrder(t *testing.T) {
 // the shared codec an escaped backslash followed by uFEFF is
 // indistinguishable from a plain \uFEFF.
 //
-// Kept byte-identical to unescapeInput in ts/test/xml-spec.test.ts.
+// Kept byte-identical to unescapeInput in ts/test/spec-input.ts.
 func specUnescape(s string) string {
 	if !strings.Contains(s, `\`) {
 		return s

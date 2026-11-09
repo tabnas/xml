@@ -18,13 +18,14 @@ applied on top of it. Embed mode also needs `@tabnas/jsonic` (see
 ## Exports
 
 ```ts
-import { Xml, decodeBOM } from '@tabnas/xml'
+import { Xml, make, decodeBOM } from '@tabnas/xml'
 import type { XmlOptions, XmlElement } from '@tabnas/xml'
 ```
 
 | Export       | Kind                | Purpose                                             |
 | ------------ | ------------------- | --------------------------------------------------- |
 | `Xml`        | `Plugin`            | The plugin. Apply with `.use(Xml, options?)`.       |
+| `make`       | `(options?) => Tabnas` | An XML parser that reads a reader a window at a time. |
 | `decodeBOM`  | `(src) => string`   | Strip/transcode a byte-order mark before parsing.   |
 | `XmlOptions` | type                | The options object accepted by `Xml`.               |
 | `XmlElement` | type                | The shape of a parsed element node.                  |
@@ -54,6 +55,52 @@ embed mode the result is whatever the outer Jsonic document evaluates to
 The engine instance is reusable; build it once and call `parse` per
 document. Deriving a child with different options re-runs the plugin, so
 options are fixed at `use` time.
+
+## `make(options?)`
+
+`make(options?: Partial<XmlOptions>): Tabnas`
+
+Builds the same parser, `new Tabnas().use(Xml, options)`, and declares
+the engine's `lex.window` option on it, so that `parseReader` reads a
+source a window at a time rather than whole (see
+[Reading from a reader](#reading-from-a-reader)). `parse` of a string
+gives what the parser without the option gives. Embed mode needs a
+jsonic engine, so `make({ embed: true })` throws, as `use` does on the
+bare engine.
+
+```js
+const { make } = require('@tabnas/xml')
+
+make().parse('<a x="1"/>')
+// => { name: 'a', localName: 'a', attributes: { x: '1' }, children: [] }
+```
+
+## Reading from a reader
+
+`tn.parseReader(reader, meta?)` (an engine method) parses a source that a
+synchronous reader hands over in bytes: an object whose `read(buf)`
+writes up to `buf.length` bytes into a `Uint8Array` and returns how many,
+`0` at the end, as `fs.readSync(fd, buf)` does. The value and the errors
+are those of `parse` of the same text decoded as UTF-8, but for an
+error's excerpt of a very long line, which shows the line only as far
+back as the window reaches.
+
+On a parser from `make`, the engine keeps a window of the source: the
+text from the oldest token the parser holds to some 64 KiB past the
+cursor. The plugin's matcher reads the text only through that window,
+and where a construct runs past the window's end (a text run, a comment,
+a CDATA section, a processing instruction, a DOCTYPE, a tag) it reads
+the window on and scans again, so the window grows only as far as one
+token is long. A parser built with `use(Xml)` and no `lex.window`
+reads the reader whole first, then parses the text.
+
+```js
+const { readSync, openSync } = require('node:fs')
+const { make } = require('@tabnas/xml')
+
+const fd = openSync('feed.xml', 'r')
+const doc = make().parseReader({ read: (buf) => readSync(fd, buf) })
+```
 
 ## `decodeBOM(src)`
 

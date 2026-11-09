@@ -12,11 +12,11 @@
 //         sha256 9b61db9f5dbffa545f4b8d78422167083a8568c59bd1129f94138f936cf6fc1f
 // Fetched by scripts/fetch-xml-suite.sh into test/xmlconf/ (gitignored: the
 // corpus is W3C-owned and is never committed to this repository). Cargo has
-// no `pretest` hook, so `corpus()` below performs the fetch, once, before
-// the first test that needs it; a corpus that cannot be obtained FAILS
-// every test here. They never skip: a conformance suite that quietly does
-// not run is worse than no suite, because the green tick then means
-// nothing.
+// no `pretest` hook, so `corpus()` (in tests/common/mod.rs) performs the
+// fetch, once, before the first test that needs it; a corpus that cannot be
+// obtained FAILS every test here. They never skip: a conformance suite that
+// quietly does not run is worse than no suite, because the green tick then
+// means nothing.
 //
 // This is the Rust mirror of go/xmlconf_test.go and ts/test/xmlconf.test.ts.
 // The runners must agree on scope, or the parity claim is meaningless:
@@ -33,57 +33,13 @@ mod common;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::OnceLock;
 
 use regex::Regex;
 use tabnas::{Tabnas, Value};
 use tabnas_xml::decode_bom;
 
-use common::repo_root;
-
-fn conf_root() -> PathBuf {
-    repo_root().join("test").join("xmlconf")
-}
-
-fn catalog_path() -> PathBuf {
-    conf_root().join("xmlconf.xml")
-}
-
-/// The corpus root, fetched on first use. Panics, and so fails the test,
-/// when the corpus is missing and cannot be fetched.
-fn corpus() -> &'static Path {
-    static ROOT: OnceLock<PathBuf> = OnceLock::new();
-    ROOT.get_or_init(|| {
-        if !catalog_path().is_file() {
-            let script = repo_root().join("scripts").join("fetch-xml-suite.sh");
-            eprintln!(
-                "W3C XML conformance corpus missing; running {}",
-                script.display()
-            );
-            let status = Command::new("bash")
-                .arg(&script)
-                .current_dir(repo_root())
-                .status();
-            match status {
-                Ok(status) if status.success() => {}
-                other => panic!(
-                    "\nFATAL: the W3C XML Conformance Test Suite is missing and could not be fetched.\n  \
-                     expected catalogue: {}\n  fetch: {other:?}\n  \
-                     fix: run scripts/fetch-xml-suite.sh (needs network access to w3.org)\n  \
-                     these tests do NOT skip.\n",
-                    catalog_path().display()
-                ),
-            }
-        }
-        assert!(
-            catalog_path().is_file(),
-            "FATAL: corpus still missing after fetch: {}",
-            catalog_path().display()
-        );
-        conf_root()
-    })
-}
+use common::corpus;
 
 /// One parser for the whole suite: `parse` takes `&self` and builds a
 /// fresh context per call, so reuse is the documented setup.
