@@ -1082,7 +1082,7 @@ def xml-render [input]
     scan-emit [] xml-step xml-finish (events input)
 ` }),
   transduce: Object.freeze({ entry: "xml-transduce", source: `; XML's transducer part: the document's JSON events from the xml
-; grammar's rule passes, for a host that reads parser events (alchemy-cli's
+; grammar's rule passes, for a host that reads parser events (dmog's
 ; \`translate\` and \`run --grammar xml\`). It is hand-written, since the
 ; element's members past its start tag, and the namespace scope they are
 ; resolved in, are built in the grammar's actions, which the passes do not
